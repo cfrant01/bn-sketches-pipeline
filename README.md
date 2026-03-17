@@ -7,8 +7,6 @@ This repository contains **only pipeline assets**:
 - config files
 - examples
 
-It intentionally excludes non-pipeline materials (e.g., diagram source folders from the original workspace).
-
 ## What The Pipeline Does
 
 `run_pipeline.py` executes:
