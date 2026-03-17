@@ -1,0 +1,20 @@
+# Trace generation configuration (key = value)
+
+# Trace simulation
+num_traces = 4
+num_steps = 8
+update_type = synchronous
+noise_level = 0.0
+seed = 42
+
+# Output files
+output_dir = outputs/traces
+output_prefix = experiment
+output_suffix = _modeled.txt
+write_trajectory_header = false
+write_genes_file = true
+
+# Optional analysis
+find_attractors = true
+find_fixed_points = true
+attractor_update_type = asynchronous

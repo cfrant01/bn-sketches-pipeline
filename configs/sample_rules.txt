@@ -1,0 +1,13 @@
+# Sample Boolean network rules for .bnet generation
+targets, factors
+
+x1 = 0
+x2 = 1
+x3 = !x1
+x4 = x1
+x5 = !x2
+x6 = !x3
+x7 = !x3
+x8 = x6
+x9 = !x5&x7 | x5&x6
+x10 = !x4 | x4&x6
