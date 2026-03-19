@@ -7,6 +7,10 @@ This repository contains **only pipeline assets**:
 - config files
 - examples
 
+## Pipeline Flow Diagram
+
+![Pipeline Flow Diagram](docs/images/pipeline_flow.png)
+
 ## What The Pipeline Does
 
 `run_pipeline.py` executes:
