@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
 """
-Run the local pipeline:
-1) create_bnet.py         -> generate a .bnet file
-2) generate_traces_from_bnet.R -> generate traces from that .bnet using a config file
-3) traces_to_sketch_properties.py -> generate trace-based PROPERTIES snippet
-4) bnet_to_sketchStructure.py -> generate MODEL snippet from the .bnet
-5) attractors_to_sketch_properties.py -> generate attractor/fixed-point dynamic properties
-6) combine_sketch_parts.py -> combine PROPERTIES and MODEL into a final sketch file
+Run the pipeline from config files.
 
-Examples:
-    python run_pipeline.py --random --n 5 --k 2 ^
-      --bnet-output "outputs\\bnet\\net.bnet" ^
-      --trace-config "configs\\traces_configuration_example.txt" ^
-      --traces-properties-config "configs\\traces_to_sketch_properties_params.txt" ^
-      --structure-config "configs\\bnet_to_sketchStructure_params.txt"
-
-    python run_pipeline.py --input "configs\\sample_rules.txt" ^
-      --bnet-output "outputs\\bnet\\from_rules.bnet" ^
-      --trace-config "configs\\traces_configuration_example.txt" ^
-      --traces-properties-config "configs\\traces_to_sketch_properties_params.txt" ^
-      --structure-config "configs\\bnet_to_sketchStructure_params.txt"
+Main idea:
+- every stage is configured by its own config file
+- run_pipeline.py reads one pipeline config that points to those stage configs
+- commands are then executed with those configs, without hardcoded per-stage parameters
 """
 
 from __future__ import annotations
@@ -29,7 +15,13 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterable
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_RSCRIPT = str(Path(r"C:\Program Files\R\R-4.3.2\bin\Rscript.exe")) if Path(r"C:\Program Files\R\R-4.3.2\bin\Rscript.exe").exists() else "Rscript"
+DEFAULT_BIOLQM_CMD = str(SCRIPT_DIR / "tools" / "bioLQM" / "bioLQM.cmd") if (SCRIPT_DIR / "tools" / "bioLQM" / "bioLQM.cmd").exists() else "bioLQM"
+DEFAULT_PIPELINE_CONFIG = str(SCRIPT_DIR / "configs" / "pipeline.txt")
 
 
 def quote_cmd(parts: list[str]) -> str:
@@ -44,14 +36,14 @@ def run_cmd(cmd: list[str], cwd: Path) -> None:
 
 
 def resolve_user_path(value: str, base_dir: Path, cwd: Path | None = None) -> Path:
-    p = Path(value)
-    if p.is_absolute():
-        return p
+    path = Path(value)
+    if path.is_absolute():
+        return path
     if cwd is not None:
-        candidate = cwd / p
+        candidate = cwd / path
         if candidate.exists():
             return candidate
-    return base_dir / p
+    return base_dir / path
 
 
 def read_kv_config(path: Path) -> Dict[str, str]:
@@ -64,313 +56,280 @@ def read_kv_config(path: Path) -> Dict[str, str]:
             continue
         if "=" not in line:
             raise ValueError(f"{path}:{idx} invalid config line (expected key = value): {raw}")
-        k, v = line.split("=", 1)
-        cfg[k.strip()] = v.strip()
+        key, value = line.split("=", 1)
+        cfg[key.strip()] = value.strip()
     return cfg
 
 
-def build_create_bnet_command(args: argparse.Namespace, scripts_dir: Path) -> list[str]:
-    create_script = scripts_dir / "create_bnet.py"
-    cmd = [args.python_cmd, str(create_script)]
-
-    if args.random:
-        cmd.extend(["--random", "--n", str(args.n), "--k", str(args.k)])
-        if args.seed is not None:
-            cmd.extend(["--seed", str(args.seed)])
-        if args.node_prefix is not None:
-            cmd.extend(["--node-prefix", args.node_prefix])
-    else:
-        cmd.extend(["--input", args.input])
-
-    cmd.extend(["--output", args.bnet_output])
-
-    if args.no_header:
-        cmd.append("--no-header")
-
-    return cmd
+def read_yaml_output_path(path: Path) -> Path:
+    try:
+        import yaml  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("Reading the BoolForge config requires PyYAML.") from exc
+    with path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"BoolForge config must be a YAML mapping: {path}")
+    output = data.get("output")
+    if not output:
+        raise ValueError(f"Missing 'output' in BoolForge config: {path}")
+    output_path = Path(str(output))
+    if not output_path.is_absolute():
+        output_path = (path.parent / output_path).resolve()
+    return output_path
 
 
-def build_trace_command(args: argparse.Namespace, scripts_dir: Path) -> list[str]:
-    trace_script = scripts_dir / "generate_traces_from_bnet.R"
+def cfg_get_bool(cfg: Dict[str, str], key: str, default: bool = False) -> bool:
+    if key not in cfg:
+        return default
+    value = cfg[key].strip().lower()
+    if value in {"1", "true", "yes", "y"}:
+        return True
+    if value in {"0", "false", "no", "n"}:
+        return False
+    raise ValueError(f"Invalid boolean for {key}: {cfg[key]}")
+
+
+def filter_dynamic_property_file(
+    source: Path,
+    target: Path,
+    keep_prefixes: Iterable[str],
+) -> bool:
+    lines = source.read_text(encoding="utf-8").splitlines()
+    prefixes = tuple(keep_prefixes)
+    filtered: list[str] = []
+    kept_any = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#! dynamic_property:"):
+            try:
+                property_name = stripped.split(":", 2)[1].strip()
+            except IndexError:
+                property_name = ""
+            if property_name.startswith(prefixes):
+                filtered.append(line)
+                kept_any = True
+            continue
+        filtered.append(line)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(filtered) + "\n", encoding="utf-8")
+    return kept_any
+
+
+def build_create_bnet_command(args: argparse.Namespace, boolforge_config: Path) -> list[str]:
+    return [args.python_cmd, str(SCRIPT_DIR / "create_bnet.py"), str(boolforge_config)]
+
+
+def build_trace_command(args: argparse.Namespace, bnet_output: Path, trace_config: Path) -> list[str]:
     return [
         args.rscript_cmd,
-        str(trace_script),
+        str(SCRIPT_DIR / "generate_traces_from_bnet.R"),
         "--bnet",
-        args.bnet_output,
+        str(bnet_output),
         "--config",
-        args.trace_config,
+        str(trace_config),
     ]
 
 
-def build_trace_properties_command(
-    args: argparse.Namespace,
-    scripts_dir: Path,
-    traces_dir: Path,
-    trace_properties_output: Path,
-) -> list[str]:
-    script = scripts_dir / "traces_to_sketch_properties.py"
-    cmd = [args.python_cmd, str(script)]
-    if args.traces_properties_config:
-        cmd.extend(["--config", args.traces_properties_config])
-    cmd.extend(["--traces-dir", str(traces_dir), "--output", str(trace_properties_output)])
-    return cmd
+def build_trace_properties_command(args: argparse.Namespace, traces_properties_config: Path) -> list[str]:
+    return [args.python_cmd, str(SCRIPT_DIR / "traces_to_sketch_properties.py"), "--config", str(traces_properties_config)]
 
 
-def build_structure_command(
-    args: argparse.Namespace,
-    scripts_dir: Path,
-    bnet_output: Path,
-    structure_output: Path,
-) -> list[str]:
-    script = scripts_dir / "bnet_to_sketchStructure.py"
-    cmd = [args.python_cmd, str(script)]
-    if args.structure_config:
-        cmd.extend(["--config", args.structure_config])
-    cmd.extend(["--bnet", str(bnet_output), "--output", str(structure_output)])
-    return cmd
+def build_structure_command(args: argparse.Namespace, structure_config: Path) -> list[str]:
+    return [args.python_cmd, str(SCRIPT_DIR / "bnet_to_sketchStructure.py"), "--config", str(structure_config)]
 
 
-def build_attractor_properties_command(
-    args: argparse.Namespace,
-    scripts_dir: Path,
-    attractor_summary: Path,
-    attractor_properties_output: Path,
-    genes_path: Path,
-) -> list[str]:
-    script = scripts_dir / "attractors_to_sketch_properties.py"
-    cmd = [
-        args.python_cmd,
-        str(script),
-        "--summary",
-        str(attractor_summary),
-        "--genes",
-        str(genes_path),
-        "--output",
-        str(attractor_properties_output),
-        "--mode",
-        args.attractor_properties_mode,
-    ]
-    if args.include_forbid_extra:
-        cmd.append("--include-forbid-extra")
-    return cmd
+def build_biolqm_analysis_command(args: argparse.Namespace, biolqm_dynamics_config: Path) -> list[str]:
+    return [args.python_cmd, str(SCRIPT_DIR / "analyze_dynamics_biolqm.py"), "--config", str(biolqm_dynamics_config)]
 
 
-def build_combine_command(
-    args: argparse.Namespace,
-    scripts_dir: Path,
-    properties_input: Path,
-    model_input: Path,
-    combined_output: Path,
-) -> list[str]:
-    script = scripts_dir / "combine_sketch_parts.py"
-    return [
-        args.python_cmd,
-        str(script),
-        "--properties",
-        str(properties_input),
-        "--model",
-        str(model_input),
-        "--output",
-        str(combined_output),
-    ]
+def build_biolqm_properties_command(args: argparse.Namespace, biolqm_properties_config: Path) -> list[str]:
+    return [args.python_cmd, str(SCRIPT_DIR / "biolqm_to_sketch_properties.py"), "--config", str(biolqm_properties_config)]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run create_bnet.py and then generate_traces_from_bnet.R as a single pipeline command."
-    )
-
-    source_group = parser.add_mutually_exclusive_group(required=True)
-    source_group.add_argument("--random", action="store_true", help="Generate a random .bnet (uses --n and --k).")
-    source_group.add_argument("--input", help="Rules file or rules directory for create_bnet.py input mode.")
-
-    parser.add_argument("--n", type=int, help="Number of nodes for --random mode.")
-    parser.add_argument("--k", type=int, help="Maximum number of regulators per function for --random mode.")
-    parser.add_argument("--seed", type=int, help="Optional seed for create_bnet.py random mode.")
-    parser.add_argument("--node-prefix", default="x", help="Node prefix for random mode (default: x).")
-    parser.add_argument("--no-header", action="store_true", help="Pass --no-header to create_bnet.py.")
-
-    parser.add_argument("--bnet-output", required=True, help="Path to the generated .bnet file (used by both steps).")
-    parser.add_argument("--trace-config", required=True, help="Trace config file for generate_traces_from_bnet.R.")
-    parser.add_argument(
-        "--traces-properties-config",
-        default="configs/traces_to_sketch_properties_params.txt",
-        help="Config file for traces_to_sketch_properties.py (CLI overrides will set traces dir/output).",
-    )
-    parser.add_argument(
-        "--structure-config",
-        default="configs/bnet_to_sketchStructure_params.txt",
-        help="Config file for bnet_to_sketchStructure.py (CLI overrides will set bnet/output).",
-    )
-    parser.add_argument(
-        "--trace-properties-output",
-        help="Optional output path for trace-derived properties snippet (default: outputs/sketch_parts/<bnet_stem>_trace_properties.aeon).",
-    )
-    parser.add_argument(
-        "--structure-output",
-        help="Optional output path for model-structure snippet (default: outputs/sketch_parts/<bnet_stem>_model_part.aeon).",
-    )
-    parser.add_argument(
-        "--attractor-properties-output",
-        help="Optional output path for attractor/fixed-point properties snippet (default: outputs/sketch_parts/<bnet_stem>_attractors_properties.aeon).",
-    )
-    parser.add_argument(
-        "--attractor-properties-mode",
-        choices=["fixed-points", "attractors", "both"],
-        default="both",
-        help="Property type to generate from attractor summary.",
-    )
-    parser.add_argument(
-        "--include-forbid-extra",
-        action="store_true",
-        help="Pass --include-forbid-extra to attractors_to_sketch_properties.py.",
-    )
-    parser.add_argument(
-        "--skip-attractor-properties",
-        action="store_true",
-        help="Skip attractors_to_sketch_properties.py even if attractor summary exists.",
-    )
-    parser.add_argument(
-        "--combined-sketch-output",
-        help="Optional output path for final combined sketch (default: outputs/sketch_parts/<bnet_stem>_final_sketch.aeon).",
-    )
-    parser.add_argument(
-        "--skip-combine",
-        action="store_true",
-        help="Skip combine_sketch_parts.py step.",
-    )
-
-    parser.add_argument("--python-cmd", default=sys.executable, help="Python executable to run create_bnet.py.")
-    parser.add_argument("--rscript-cmd", default="Rscript", help="Rscript executable to run generate_traces_from_bnet.R.")
+    parser = argparse.ArgumentParser(description="Run the pipeline from config files.")
+    parser.add_argument("--config", default=DEFAULT_PIPELINE_CONFIG, help="Pipeline config file.")
+    parser.add_argument("--python-cmd", default=sys.executable, help="Python executable for Python steps.")
+    parser.add_argument("--rscript-cmd", default=DEFAULT_RSCRIPT, help="Rscript executable for trace generation.")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing them.")
+    return parser.parse_args()
 
-    args = parser.parse_args()
 
-    if args.random and (args.n is None or args.k is None):
-        parser.error("--random requires --n and --k.")
-    if (args.n is not None or args.k is not None) and not args.random:
-        parser.error("--n/--k are only valid with --random.")
-
-    return args
+def require_cfg_value(cfg: Dict[str, str], key: str, cfg_path: Path) -> str:
+    value = cfg.get(key)
+    if not value:
+        raise ValueError(f"Missing required key '{key}' in pipeline config: {cfg_path}")
+    return value
 
 
 def main() -> None:
     args = parse_args()
-    scripts_dir = Path(__file__).resolve().parent
     cwd = Path.cwd()
-    bnet_output = resolve_user_path(args.bnet_output, scripts_dir, cwd)
-    if bnet_output.suffix.lower() != ".bnet":
-        raise SystemExit("--bnet-output must point to a .bnet file.")
+    pipeline_cfg_path = resolve_user_path(args.config, SCRIPT_DIR, cwd)
+    pipeline_cfg = read_kv_config(pipeline_cfg_path)
 
-    trace_cfg_path = resolve_user_path(args.trace_config, scripts_dir, cwd)
-    trace_cfg = read_kv_config(trace_cfg_path)
-    trace_output_dir_raw = Path(trace_cfg.get("output_dir", "outputs/traces"))
-    if trace_output_dir_raw.is_absolute():
-        trace_output_dir = trace_output_dir_raw
+    boolforge_config_value = pipeline_cfg.get("boolforge_config", "").strip()
+    boolforge_config = (
+        resolve_user_path(boolforge_config_value, SCRIPT_DIR, cwd) if boolforge_config_value else None
+    )
+    trace_config = resolve_user_path(require_cfg_value(pipeline_cfg, "trace_config", pipeline_cfg_path), SCRIPT_DIR, cwd)
+    traces_properties_config = resolve_user_path(require_cfg_value(pipeline_cfg, "traces_properties_config", pipeline_cfg_path), SCRIPT_DIR, cwd)
+    structure_config = resolve_user_path(require_cfg_value(pipeline_cfg, "structure_config", pipeline_cfg_path), SCRIPT_DIR, cwd)
+    biolqm_dynamics_config = resolve_user_path(require_cfg_value(pipeline_cfg, "biolqm_dynamics_config", pipeline_cfg_path), SCRIPT_DIR, cwd)
+    biolqm_properties_config = resolve_user_path(require_cfg_value(pipeline_cfg, "biolqm_properties_config", pipeline_cfg_path), SCRIPT_DIR, cwd)
+    combined_sketch_output = resolve_user_path(
+        require_cfg_value(pipeline_cfg, "combined_sketch_output", pipeline_cfg_path),
+        SCRIPT_DIR,
+        cwd,
+    )
+    existing_bnet = pipeline_cfg.get("existing_bnet", "").strip()
+    existing_bnet_path = resolve_user_path(existing_bnet, SCRIPT_DIR, cwd) if existing_bnet else None
+    skip_attractor_properties = cfg_get_bool(pipeline_cfg, "skip_attractor_properties", False)
+    skip_combine = cfg_get_bool(pipeline_cfg, "skip_combine", False)
+    include_trace_reachability_properties = cfg_get_bool(
+        pipeline_cfg, "include_trace_reachability_properties", True
+    )
+    include_trace_attractor_candidate_properties = cfg_get_bool(
+        pipeline_cfg, "include_trace_attractor_candidate_properties", True
+    )
+    include_trace_cycle_candidate_properties = cfg_get_bool(
+        pipeline_cfg, "include_trace_cycle_candidate_properties", True
+    )
+    include_biolqm_fixed_point_properties = cfg_get_bool(
+        pipeline_cfg, "include_biolqm_fixed_point_properties", True
+    )
+    include_biolqm_trap_space_properties = cfg_get_bool(
+        pipeline_cfg, "include_biolqm_trap_space_properties", True
+    )
+
+    trace_cfg = read_kv_config(trace_config)
+    traces_props_cfg = read_kv_config(traces_properties_config)
+    structure_cfg = read_kv_config(structure_config)
+    biolqm_dyn_cfg = read_kv_config(biolqm_dynamics_config)
+    biolqm_props_cfg = read_kv_config(biolqm_properties_config)
+
+    if existing_bnet_path is not None:
+        bnet_output = existing_bnet_path
+    elif boolforge_config is not None:
+        bnet_output = read_yaml_output_path(boolforge_config)
     else:
-        # Paths in the trace config are interpreted relative to the pipeline root.
-        trace_output_dir = (scripts_dir / trace_output_dir_raw).resolve()
-    genes_path = trace_output_dir / "genes.txt"
-    attractor_summary = trace_output_dir / "attractors_summary.txt"
+        raise ValueError(
+            f"Pipeline config must define either 'existing_bnet' or 'boolforge_config': {pipeline_cfg_path}"
+        )
+    trace_properties_output = resolve_user_path(require_cfg_value(traces_props_cfg, "output", traces_properties_config), SCRIPT_DIR, cwd)
+    structure_output = resolve_user_path(require_cfg_value(structure_cfg, "output", structure_config), SCRIPT_DIR, cwd)
+    biolqm_fixpoints_output = resolve_user_path(require_cfg_value(biolqm_dyn_cfg, "fixpoints_output", biolqm_dynamics_config), SCRIPT_DIR, cwd)
+    biolqm_trapspaces_output = resolve_user_path(require_cfg_value(biolqm_dyn_cfg, "trapspaces_output", biolqm_dynamics_config), SCRIPT_DIR, cwd)
+    attractor_properties_output = resolve_user_path(require_cfg_value(biolqm_props_cfg, "output", biolqm_properties_config), SCRIPT_DIR, cwd)
 
-    default_trace_props = scripts_dir / "outputs" / "sketch_parts" / f"{bnet_output.stem}_trace_properties.aeon"
-    default_structure = scripts_dir / "outputs" / "sketch_parts" / f"{bnet_output.stem}_model_part.aeon"
-    default_attr_props = scripts_dir / "outputs" / "sketch_parts" / f"{bnet_output.stem}_attractors_properties.aeon"
-    default_combined = scripts_dir / "outputs" / "sketch_parts" / f"{bnet_output.stem}_final_sketch.aeon"
+    create_cmd = build_create_bnet_command(args, boolforge_config) if boolforge_config and existing_bnet_path is None else []
+    trace_cmd = build_trace_command(args, bnet_output, trace_config)
+    trace_props_cmd = build_trace_properties_command(args, traces_properties_config)
+    structure_cmd = build_structure_command(args, structure_config)
+    biolqm_analysis_cmd = build_biolqm_analysis_command(args, biolqm_dynamics_config)
+    biolqm_properties_cmd = build_biolqm_properties_command(args, biolqm_properties_config)
 
-    trace_properties_output = (
-        resolve_user_path(args.trace_properties_output, scripts_dir, cwd)
-        if args.trace_properties_output
-        else default_trace_props
+    filtered_trace_properties_output = trace_properties_output.with_name(
+        f"{trace_properties_output.stem}_filtered{trace_properties_output.suffix}"
     )
-    structure_output = (
-        resolve_user_path(args.structure_output, scripts_dir, cwd)
-        if args.structure_output
-        else default_structure
-    )
-    attractor_properties_output = (
-        resolve_user_path(args.attractor_properties_output, scripts_dir, cwd)
-        if args.attractor_properties_output
-        else default_attr_props
-    )
-    combined_sketch_output = (
-        resolve_user_path(args.combined_sketch_output, scripts_dir, cwd)
-        if args.combined_sketch_output
-        else default_combined
+    filtered_attractor_properties_output = attractor_properties_output.with_name(
+        f"{attractor_properties_output.stem}_filtered{attractor_properties_output.suffix}"
     )
 
-    create_cmd = build_create_bnet_command(args, scripts_dir)
-    trace_cmd = build_trace_command(args, scripts_dir)
-    trace_props_cmd = build_trace_properties_command(args, scripts_dir, trace_output_dir, trace_properties_output)
-    structure_cmd = build_structure_command(args, scripts_dir, bnet_output, structure_output)
-    attractor_cmd = build_attractor_properties_command(
-        args, scripts_dir, attractor_summary, attractor_properties_output, genes_path
-    )
-    combine_from_properties = (
-        attractor_properties_output if (not args.skip_attractor_properties and attractor_summary.exists()) else trace_properties_output
-    )
-    combine_cmd = build_combine_command(
-        args,
-        scripts_dir,
-        combine_from_properties,
-        structure_output,
-        combined_sketch_output,
-    )
+    combine_properties: list[str] = []
 
     print("Pipeline steps:")
-    print(f"1) create .bnet -> {bnet_output}")
-    print(f"2) generate traces using config -> {trace_cfg_path}")
+    if existing_bnet_path is not None:
+        print(f"1) use existing .bnet -> {bnet_output}")
+    else:
+        print(f"1) create .bnet -> {bnet_output}")
+    print(f"2) generate traces using config -> {trace_config}")
     print(f"3) trace properties -> {trace_properties_output}")
     print(f"4) model structure -> {structure_output}")
-    if args.skip_attractor_properties:
-        print("5) attractor/fixed-point properties -> skipped")
+    if skip_attractor_properties:
+        print("5) bioLQM dynamics/property generation -> skipped")
     else:
-        print(f"5) attractor/fixed-point properties -> {attractor_properties_output}")
-    if args.skip_combine:
-        print("6) combine final sketch -> skipped")
+        print(f"5) bioLQM raw outputs -> {biolqm_fixpoints_output}, {biolqm_trapspaces_output}")
+        print(f"6) dynamic properties -> {attractor_properties_output}")
+    if skip_combine:
+        print("7) combine final sketch -> skipped")
     else:
-        print(f"6) combine final sketch -> {combined_sketch_output}")
+        print(f"7) combine final sketch -> {combined_sketch_output}")
 
     if args.dry_run:
         print("\nDry run mode (no execution):")
-        print(quote_cmd(create_cmd))
+        if create_cmd:
+            print(quote_cmd(create_cmd))
         print(quote_cmd(trace_cmd))
         print(quote_cmd(trace_props_cmd))
         print(quote_cmd(structure_cmd))
-        if not args.skip_attractor_properties:
-            print(quote_cmd(attractor_cmd))
-        if not args.skip_combine:
-            print(quote_cmd(combine_cmd))
+        if not skip_attractor_properties:
+            print(quote_cmd(biolqm_analysis_cmd))
+            print(quote_cmd(biolqm_properties_cmd))
+        if not skip_combine:
+            print("[combine step will use centralized include flags from pipeline config]")
         return
 
-    run_cmd(create_cmd, cwd)
+    if create_cmd:
+        run_cmd(create_cmd, cwd)
     run_cmd(trace_cmd, cwd)
     run_cmd(trace_props_cmd, cwd)
     run_cmd(structure_cmd, cwd)
-    if not args.skip_attractor_properties:
-        if attractor_summary.exists():
-            run_cmd(attractor_cmd, cwd)
+    if not skip_attractor_properties:
+        run_cmd(biolqm_analysis_cmd, cwd)
+        run_cmd(biolqm_properties_cmd, cwd)
+
+    trace_kept = filter_dynamic_property_file(
+        trace_properties_output,
+        filtered_trace_properties_output,
+        keep_prefixes=[
+            *(["reachability_"] if include_trace_reachability_properties else []),
+            *(["trace_attractor_candidate_"] if include_trace_attractor_candidate_properties else []),
+            *(["trace_cycle_candidate_"] if include_trace_cycle_candidate_properties else []),
+        ],
+    )
+    if trace_kept:
+        combine_properties.append(str(filtered_trace_properties_output))
+
+    if not skip_attractor_properties:
+        attractor_kept = filter_dynamic_property_file(
+            attractor_properties_output,
+            filtered_attractor_properties_output,
+            keep_prefixes=[
+                *(
+                    ["fixed_point_"]
+                    if include_biolqm_fixed_point_properties
+                    else []
+                ),
+                *(
+                    ["trap_space_"]
+                    if include_biolqm_trap_space_properties
+                    else []
+                ),
+            ],
+        )
+        if attractor_kept:
+            combine_properties.append(str(filtered_attractor_properties_output))
+
+    if not skip_combine:
+        if not combine_properties:
+            print("\n[INFO] No property families selected for final combine; skipping combine step.")
         else:
-            print(f"\n[SKIP] Attractor summary not found: {attractor_summary}")
-    if not args.skip_combine:
-        if not structure_output.exists():
-            print(f"\n[SKIP] Structure output not found: {structure_output}")
-        elif combine_from_properties.exists():
+            combine_cmd = [
+                args.python_cmd,
+                str(SCRIPT_DIR / "combine_sketch_parts.py"),
+                "--properties",
+                *combine_properties,
+                "--model",
+                str(structure_output),
+                "--output",
+                str(combined_sketch_output),
+            ]
             run_cmd(combine_cmd, cwd)
-        elif trace_properties_output.exists():
-            fallback_combine_cmd = build_combine_command(
-                args,
-                scripts_dir,
-                trace_properties_output,
-                structure_output,
-                combined_sketch_output,
-            )
-            run_cmd(fallback_combine_cmd, cwd)
-        else:
-            print(
-                f"\n[SKIP] No properties file available for combine step "
-                f"({combine_from_properties} and {trace_properties_output} are missing)."
-            )
+
     print("\nPipeline completed successfully.")
 
 

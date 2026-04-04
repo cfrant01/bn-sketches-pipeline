@@ -1,0 +1,12 @@
+# Parameters for analyze_dynamics_biolqm.py (key = value)
+
+bnet = outputs/bnet/net.bnet
+fixpoints_output = outputs/dynamics/net_fixpoints.txt
+trapspaces_output = outputs/dynamics/net_trapspaces.txt
+
+# Optional bioLQM command configuration
+biolqm_cmd = tools/bioLQM/bioLQM.cmd
+# java_cmd = java
+# biolqm_jar = C:\path\to\bioLQM.jar
+# skip_fixpoints = false
+# skip_trapspaces = false

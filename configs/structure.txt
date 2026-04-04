@@ -1,0 +1,22 @@
+# Parameters for bnet_to_sketchStructure.py (key = value)
+
+# Required
+bnet = outputs/bnet/net.bnet
+output = outputs/sketch_parts/net_model_part.aeon
+
+# Reveal controls
+# `reveal_functions_percent` + `reveal_regulators_percent` reveal support only.
+# `reveal_exact_functions_percent` reveals the exact Boolean rule for that percentage
+# of targets and overrides support-only reveal for those targets.
+reveal_functions_percent = 50
+reveal_regulators_percent = 50
+reveal_exact_functions_percent = 50
+
+# Optional
+seed = 42
+edge_op = -??
+hidden_policy = omit
+infer_monotonicity_for_exact = true
+positive_edge_op = ->
+negative_edge_op = -|
+ambiguous_edge_op = -?

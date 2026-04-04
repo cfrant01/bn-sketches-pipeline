@@ -6,6 +6,9 @@ __pycache__/
 # Generated outputs
 outputs/**
 !outputs/.gitkeep
+!outputs/**/
+!outputs/**/.gitkeep
+diagrams/
 
 # Local OS/editor noise
 .DS_Store

@@ -43,18 +43,23 @@ def trim_trailing_blank_lines(lines: List[str]) -> List[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Combine PROPERTIES and MODEL snippets into one sketch .aeon file.")
-    parser.add_argument("--properties", required=True)
+    parser.add_argument("--properties", required=True, nargs="+")
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--no-blank-line", action="store_true")
     args = parser.parse_args()
 
     base_dir = Path(__file__).resolve().parent
-    properties_path = resolve_user_path(args.properties, base_dir)
+    properties_paths = [resolve_user_path(value, base_dir) for value in args.properties]
     model_path = resolve_user_path(args.model, base_dir)
     output_path = resolve_user_path(args.output, base_dir)
 
-    prop = trim_trailing_blank_lines(extract_section(read_lines(properties_path), "## PROPERTIES"))
+    prop: List[str] = []
+    for properties_path in properties_paths:
+        section = trim_trailing_blank_lines(extract_section(read_lines(properties_path), "## PROPERTIES"))
+        if prop and section and section[0].strip():
+            prop.append("")
+        prop.extend(section)
     model = trim_trailing_blank_lines(extract_section(read_lines(model_path), "## MODEL"))
 
     out: List[str] = ["## PROPERTIES", *prop]
@@ -65,11 +70,11 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
-    print(f"Properties source: {properties_path}")
+    for properties_path in properties_paths:
+        print(f"Properties source: {properties_path}")
     print(f"Model source: {model_path}")
     print(f"Output: {output_path}")
 
 
 if __name__ == "__main__":
     main()
-

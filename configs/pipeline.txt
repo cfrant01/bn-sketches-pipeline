@@ -1,0 +1,17 @@
+# Pipeline orchestration config (key = value)
+
+boolforge_config = configs/boolforge.yaml
+trace_config = configs/traces.txt
+traces_properties_config = configs/trace_properties.txt
+structure_config = configs/structure.txt
+biolqm_dynamics_config = configs/dynamics.txt
+biolqm_properties_config = configs/dynamics_properties.txt
+
+combined_sketch_output = outputs/Final_Sketch/net_final_sketch.aeon
+
+# Centralized include switches for the final sketch
+include_trace_reachability_properties = true
+include_trace_attractor_candidate_properties = true
+include_trace_cycle_candidate_properties = true
+include_biolqm_fixed_point_properties = true
+include_biolqm_trap_space_properties = true

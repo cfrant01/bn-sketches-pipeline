@@ -6,18 +6,22 @@ The script extracts which variables (regulators) appear in each Boolean function
 builds an AEON sketch model section with unknown influence signs (`-??`) and symbolic
 function placeholders (`f_<target>(...)`).
 
-You can control reveal granularity with two independent percentages:
+You can control reveal granularity with three independent percentages:
 1) `--reveal-functions-percent`: reveal support information only for a subset of targets
 2) `--reveal-regulators-percent`: for revealed targets, reveal only a subset of regulators
+3) `--reveal-exact-functions-percent`: reveal the full Boolean update rule for a subset of targets
+
+Exact-function reveal overrides support-only reveal for the selected targets.
 
 Examples:
-    python bnet_to_sketchStructure.py --config configs/bnet_to_sketchStructure_params.txt
-    python bnet_to_sketchStructure.py --config configs/bnet_to_sketchStructure_params.txt --seed 42
+    python bnet_to_sketchStructure.py --config configs/structure.txt
+    python bnet_to_sketchStructure.py --config configs/structure.txt --seed 42
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import random
 import re
 import sys
@@ -26,6 +30,72 @@ from typing import Dict, List, Sequence, Tuple
 
 
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def compile_boolean_expr(expr: str):
+    def replace_token(match: re.Match[str]) -> str:
+        token = match.group(0)
+        return f'values["{token}"]'
+
+    substituted = TOKEN_RE.sub(replace_token, expr)
+    compiled_source = substituted.replace("!", " not ").replace("&", " and ").replace("|", " or ").strip()
+    return compile(compiled_source, "<bnet-expr>", "eval")
+
+
+def evaluate_boolean_expr(compiled_expr, values: dict[str, bool]) -> bool:
+    return bool(eval(compiled_expr, {"__builtins__": {}}, {"values": values}))
+
+
+def classify_regulation_edges(
+    expr: str,
+    regulators: Sequence[str],
+    positive_op: str,
+    negative_op: str,
+    ambiguous_op: str,
+    optional_op: str,
+) -> Dict[str, str]:
+    if not regulators:
+        return {}
+
+    compiled_expr = compile_boolean_expr(expr)
+    edge_ops: Dict[str, str] = {}
+
+    for regulator in regulators:
+        other_regs = [name for name in regulators if name != regulator]
+        saw_positive = False
+        saw_negative = False
+        is_essential = False
+
+        for bits in itertools.product([False, True], repeat=len(other_regs)):
+            base_assignment = dict(zip(other_regs, bits))
+            low_assignment = dict(base_assignment)
+            high_assignment = dict(base_assignment)
+            low_assignment[regulator] = False
+            high_assignment[regulator] = True
+
+            low_value = evaluate_boolean_expr(compiled_expr, low_assignment)
+            high_value = evaluate_boolean_expr(compiled_expr, high_assignment)
+
+            if low_value != high_value:
+                is_essential = True
+            if (not low_value) and high_value:
+                saw_positive = True
+            if low_value and (not high_value):
+                saw_negative = True
+
+            if saw_positive and saw_negative:
+                break
+
+        if not is_essential:
+            edge_ops[regulator] = optional_op
+        elif saw_positive and not saw_negative:
+            edge_ops[regulator] = positive_op
+        elif saw_negative and not saw_positive:
+            edge_ops[regulator] = negative_op
+        else:
+            edge_ops[regulator] = ambiguous_op
+
+    return edge_ops
 
 
 def read_kv_config(path: Path) -> dict[str, str]:
@@ -135,30 +205,41 @@ def choose_subset(items: Sequence[str], reveal_percent: float, rng: random.Rando
 
 
 def build_model_section(
+    rules: Sequence[Tuple[str, str]],
     supports: Dict[str, List[str]],
     reveal_functions_percent: float,
     reveal_regulators_percent: float,
+    reveal_exact_functions_percent: float,
     seed: int | None,
     edge_op: str,
     hidden_policy: str,
+    infer_monotonicity_for_exact: bool,
+    positive_edge_op: str,
+    negative_edge_op: str,
+    ambiguous_edge_op: str,
 ) -> List[str]:
     if not (0 <= reveal_functions_percent <= 100):
         raise ValueError("--reveal-functions-percent must be between 0 and 100.")
     if not (0 <= reveal_regulators_percent <= 100):
         raise ValueError("--reveal-regulators-percent must be between 0 and 100.")
+    if not (0 <= reveal_exact_functions_percent <= 100):
+        raise ValueError("--reveal-exact-functions-percent must be between 0 and 100.")
 
     rng = random.Random(seed)
-    targets = list(supports.keys())  # preserve .bnet order
+    targets = [target for target, _ in rules]  # preserve .bnet order
     all_variables = list(targets)
+    expr_map = {target: expr for target, expr in rules}
 
     revealed_targets = set(choose_subset(targets, reveal_functions_percent, rng))
+    exact_targets = set(choose_subset(targets, reveal_exact_functions_percent, rng))
 
     lines = ["## MODEL"]
 
     for target in targets:
         full_regs = supports[target]
-        is_hidden = target not in revealed_targets
-        regs_to_reveal = [] if is_hidden else choose_subset(full_regs, reveal_regulators_percent, rng)
+        is_exact = target in exact_targets
+        is_hidden = (target not in revealed_targets) and not is_exact
+        regs_to_reveal = list(full_regs) if is_exact else ([] if is_hidden else choose_subset(full_regs, reveal_regulators_percent, rng))
 
         edge_regs = regs_to_reveal
         if not regs_to_reveal and hidden_policy == "omit":
@@ -167,10 +248,26 @@ def build_model_section(
             # the hidden target maximally unconstrained instead of silently removing it.
             edge_regs = all_variables
 
-        for reg in edge_regs:
-            lines.append(f"{reg} {edge_op} {target}")
+        exact_edge_ops = (
+            classify_regulation_edges(
+                expr=expr_map[target],
+                regulators=full_regs,
+                positive_op=positive_edge_op,
+                negative_op=negative_edge_op,
+                ambiguous_op=ambiguous_edge_op,
+                optional_op=edge_op,
+            )
+            if is_exact and infer_monotonicity_for_exact
+            else {}
+        )
 
-        if regs_to_reveal:
+        for reg in edge_regs:
+            reg_edge_op = exact_edge_ops.get(reg, edge_op)
+            lines.append(f"{reg} {reg_edge_op} {target}")
+
+        if is_exact:
+            lines.append(f"${target}:{expr_map[target]}")
+        elif regs_to_reveal:
             args = ", ".join(regs_to_reveal)
             lines.append(f"${target}:f_{target}({args})")
         else:
@@ -207,6 +304,12 @@ def main() -> None:
         default=100.0,
         help="Percent of regulators revealed inside each revealed function.",
     )
+    parser.add_argument(
+        "--reveal-exact-functions-percent",
+        type=float,
+        default=0.0,
+        help="Percent of target functions revealed exactly as Boolean rules.",
+    )
     parser.add_argument("--seed", type=int, help="Optional random seed for reproducibility.")
     parser.add_argument(
         "--edge-op",
@@ -218,6 +321,26 @@ def main() -> None:
         choices=["omit", "question", "self"],
         default="omit",
         help="How to represent targets with no revealed regulators: omit the update line (omit), '$x: ?' (question), or self-loop identity (self).",
+    )
+    parser.add_argument(
+        "--infer-monotonicity-for-exact",
+        action="store_true",
+        help="Infer regulation monotonicity/essentiality for exactly revealed Boolean rules and emit AEON edge operators accordingly.",
+    )
+    parser.add_argument(
+        "--positive-edge-op",
+        default="->",
+        help="Edge operator used for essential positive regulations inferred from exact rules.",
+    )
+    parser.add_argument(
+        "--negative-edge-op",
+        default="-|",
+        help="Edge operator used for essential negative regulations inferred from exact rules.",
+    )
+    parser.add_argument(
+        "--ambiguous-edge-op",
+        default="-?",
+        help="Edge operator used for essential but sign-ambiguous regulations inferred from exact rules.",
     )
     args = parser.parse_args()
     base_dir = Path(__file__).resolve().parent
@@ -235,12 +358,38 @@ def main() -> None:
         if arg_was_passed("--reveal-regulators-percent")
         else cfg_get_float(cfg, "reveal_regulators_percent", args.reveal_regulators_percent)
     )
+    reveal_exact_functions_percent = (
+        args.reveal_exact_functions_percent
+        if arg_was_passed("--reveal-exact-functions-percent")
+        else cfg_get_float(cfg, "reveal_exact_functions_percent", args.reveal_exact_functions_percent)
+    )
     seed = args.seed if args.seed is not None else cfg_get_int(cfg, "seed", None)
     edge_op = args.edge_op if arg_was_passed("--edge-op") else cfg_get_str(cfg, "edge_op", args.edge_op)
     hidden_policy = (
         args.hidden_policy
         if arg_was_passed("--hidden-policy")
         else cfg_get_str(cfg, "hidden_policy", args.hidden_policy)
+    )
+    infer_monotonicity_for_exact = (
+        args.infer_monotonicity_for_exact
+        if arg_was_passed("--infer-monotonicity-for-exact")
+        else str(cfg_get_str(cfg, "infer_monotonicity_for_exact", "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    positive_edge_op = (
+        args.positive_edge_op
+        if arg_was_passed("--positive-edge-op")
+        else cfg_get_str(cfg, "positive_edge_op", args.positive_edge_op)
+    )
+    negative_edge_op = (
+        args.negative_edge_op
+        if arg_was_passed("--negative-edge-op")
+        else cfg_get_str(cfg, "negative_edge_op", args.negative_edge_op)
+    )
+    ambiguous_edge_op = (
+        args.ambiguous_edge_op
+        if arg_was_passed("--ambiguous-edge-op")
+        else cfg_get_str(cfg, "ambiguous_edge_op", args.ambiguous_edge_op)
     )
 
     if not bnet_path or not output_path_value:
@@ -249,12 +398,18 @@ def main() -> None:
     rules = parse_bnet(resolve_user_path(bnet_path, base_dir))
     supports = extract_regulators(rules)
     lines = build_model_section(
+        rules=rules,
         supports=supports,
         reveal_functions_percent=float(reveal_functions_percent),
         reveal_regulators_percent=float(reveal_regulators_percent),
+        reveal_exact_functions_percent=float(reveal_exact_functions_percent),
         seed=seed,
         edge_op=str(edge_op),
         hidden_policy=str(hidden_policy),
+        infer_monotonicity_for_exact=bool(infer_monotonicity_for_exact),
+        positive_edge_op=str(positive_edge_op),
+        negative_edge_op=str(negative_edge_op),
+        ambiguous_edge_op=str(ambiguous_edge_op),
     )
 
     out_path = resolve_user_path(output_path_value, base_dir)
@@ -267,6 +422,8 @@ def main() -> None:
     print(f"Total regulator occurrences in supports: {total_regs}")
     print(f"Reveal functions percent: {reveal_functions_percent}")
     print(f"Reveal regulators percent: {reveal_regulators_percent}")
+    print(f"Reveal exact functions percent: {reveal_exact_functions_percent}")
+    print(f"Infer monotonicity for exact rules: {infer_monotonicity_for_exact}")
     if seed is not None:
         print(f"Seed: {seed}")
     print(f"Output: {out_path}")

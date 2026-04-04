@@ -1,0 +1,20 @@
+# Parameters for traces_to_sketch_properties.py (key = value)
+
+# Required
+traces_dir = outputs/traces
+output = outputs/sketch_parts/net_trace_properties.aeon
+
+# Optional
+# genes = outputs/traces/genes.txt
+trace_glob = experiment*_modeled.txt
+pair_mode = endpoints
+keep_percent = 100
+partial_state_size = 3
+partial_state_mode = random_per_property
+seed = 42
+no_dedup = false
+compress_stutter = true
+max_chain_states = 6
+property_prefix = reachability
+start_index = 1
+no_properties_header = false

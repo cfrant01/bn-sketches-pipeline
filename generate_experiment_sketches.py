@@ -25,6 +25,8 @@ from typing import Iterable, List
 SCRIPT_DIR = Path(__file__).resolve().parent
 PYTHON = sys.executable
 DEFAULT_RSCRIPT = Path(r"C:\Program Files\R\R-4.3.2\bin\Rscript.exe")
+DEFAULT_JAVA = "java"
+DEFAULT_BIOLQM = str((SCRIPT_DIR / "tools" / "bioLQM" / "bioLQM.cmd")) if (SCRIPT_DIR / "tools" / "bioLQM" / "bioLQM.cmd").exists() else "bioLQM"
 
 CASES = [
     ("synchronous", 3, 2),
@@ -96,6 +98,9 @@ def main() -> None:
     parser.add_argument("--num-traces", type=int, default=5)
     parser.add_argument("--num-steps", type=int, default=10)
     parser.add_argument("--rscript-cmd", default=str(DEFAULT_RSCRIPT), help="Path to Rscript.exe.")
+    parser.add_argument("--biolqm-cmd", default=DEFAULT_BIOLQM, help="bioLQM executable when not using --biolqm-jar.")
+    parser.add_argument("--java-cmd", default=DEFAULT_JAVA, help="Java executable used with --biolqm-jar.")
+    parser.add_argument("--biolqm-jar", help="Optional path to bioLQM.jar.")
     parser.add_argument("--dry-run", action="store_true", help="Create configs only; skip external tool execution.")
     args = parser.parse_args()
 
@@ -139,9 +144,6 @@ def main() -> None:
                 ("output_suffix", "_modeled.txt"),
                 ("write_trajectory_header", "false"),
                 ("write_genes_file", "true"),
-                ("find_attractors", "true"),
-                ("find_fixed_points", "true"),
-                ("attractor_update_type", update_type),
                 ("seed", str(case_seed)),
             ],
         )
@@ -192,8 +194,8 @@ def main() -> None:
         level2_chain_cfg = config_dir / "trace_chain_level2.txt"
         level3_trace_cfg = config_dir / "trace_props_level3.txt"
         level3_chain_cfg = config_dir / "trace_chain_level3.txt"
-        level3_fp_cfg = config_dir / "fixed_points_level3.txt"
-        level3_attr_cfg = config_dir / "attractors_level3.txt"
+        level3_dyn_cfg = config_dir / "biolqm_dynamics_level3.txt"
+        level3_dyn_props_cfg = config_dir / "biolqm_properties_level3.txt"
 
         write_kv(
             level1_trace_cfg,
@@ -261,26 +263,24 @@ def main() -> None:
             ],
         )
         write_kv(
-            level3_fp_cfg,
+            level3_dyn_cfg,
             [
-                ("traces_dir", str(traces_dir)),
-                ("output", str(parts_dir / "fixed_points_level3.aeon")),
-                ("trace_glob", "experiment*_modeled.txt"),
-                ("min_stable_length", "2"),
-                ("property_prefix", "fixed_point"),
-                ("start_index", "1"),
-                ("include_forbid_extra", "true"),
-            ],
+                ("bnet", str(bnet_path)),
+                ("fixpoints_output", str(generated_dir / "dynamics" / "fixpoints.txt")),
+                ("trapspaces_output", str(generated_dir / "dynamics" / "trapspaces.txt")),
+                ("biolqm_cmd", args.biolqm_cmd),
+                ("java_cmd", args.java_cmd),
+            ] + ([("biolqm_jar", str(Path(args.biolqm_jar)))] if args.biolqm_jar else []),
         )
         write_kv(
-            level3_attr_cfg,
+            level3_dyn_props_cfg,
             [
-                ("traces_dir", str(traces_dir)),
-                ("output", str(parts_dir / "attractors_level3.aeon")),
-                ("trace_glob", "experiment*_modeled.txt"),
-                ("max_cycle_length", "5"),
-                ("min_cycle_repeats", "2"),
-                ("property_prefix", "attractor"),
+                ("fixpoints", str(generated_dir / "dynamics" / "fixpoints.txt")),
+                ("trapspaces", str(generated_dir / "dynamics" / "trapspaces.txt")),
+                ("output", str(parts_dir / "dynamic_properties_level3.aeon")),
+                ("mode", "both"),
+                ("property_prefix_fixed", "fixed_point"),
+                ("property_prefix_trap", "trap_space"),
                 ("start_index", "1"),
                 ("include_forbid_extra", "true"),
             ],
@@ -318,8 +318,8 @@ def main() -> None:
             [PYTHON, str(SCRIPT_DIR / "traces_to_sketch_properties.py"), "--config", str(level2_chain_cfg)],
             [PYTHON, str(SCRIPT_DIR / "traces_to_sketch_properties.py"), "--config", str(level3_trace_cfg)],
             [PYTHON, str(SCRIPT_DIR / "traces_to_sketch_properties.py"), "--config", str(level3_chain_cfg)],
-            [PYTHON, str(SCRIPT_DIR / "fixed_points_from_traces.py"), "--config", str(level3_fp_cfg)],
-            [PYTHON, str(SCRIPT_DIR / "attractors_from_traces.py"), "--config", str(level3_attr_cfg)],
+            [PYTHON, str(SCRIPT_DIR / "analyze_dynamics_biolqm.py"), "--config", str(level3_dyn_cfg)],
+            [PYTHON, str(SCRIPT_DIR / "biolqm_to_sketch_properties.py"), "--config", str(level3_dyn_props_cfg)],
         ]
 
         print(f"=== {case_name} ===")
@@ -330,27 +330,25 @@ def main() -> None:
                 run_cmd(cmd, SCRIPT_DIR)
             for cmd in props_cmds:
                 run_cmd(cmd, SCRIPT_DIR)
-
-        combine_sections(
-            sketches_dir / f"{case_name}__level1_basic.aeon",
-            [parts_dir / "trace_properties_level1.aeon"],
-            parts_dir / "model_level1.aeon",
-        )
-        combine_sections(
-            sketches_dir / f"{case_name}__level2_traces_plus_chains.aeon",
-            [parts_dir / "trace_properties_level2.aeon", parts_dir / "trace_chains_level2.aeon"],
-            parts_dir / "model_level2.aeon",
-        )
-        combine_sections(
-            sketches_dir / f"{case_name}__level3_full.aeon",
-            [
-                parts_dir / "trace_properties_level3.aeon",
-                parts_dir / "trace_chains_level3.aeon",
-                parts_dir / "fixed_points_level3.aeon",
-                parts_dir / "attractors_level3.aeon",
-            ],
-            parts_dir / "model_level3.aeon",
-        )
+            combine_sections(
+                sketches_dir / f"{case_name}__level1_basic.aeon",
+                [parts_dir / "trace_properties_level1.aeon"],
+                parts_dir / "model_level1.aeon",
+            )
+            combine_sections(
+                sketches_dir / f"{case_name}__level2_traces_plus_chains.aeon",
+                [parts_dir / "trace_properties_level2.aeon", parts_dir / "trace_chains_level2.aeon"],
+                parts_dir / "model_level2.aeon",
+            )
+            combine_sections(
+                sketches_dir / f"{case_name}__level3_full.aeon",
+                [
+                    parts_dir / "trace_properties_level3.aeon",
+                    parts_dir / "trace_chains_level3.aeon",
+                    parts_dir / "dynamic_properties_level3.aeon",
+                ],
+                parts_dir / "model_level3.aeon",
+            )
 
     print(f"Batch output root: {output_root}")
 

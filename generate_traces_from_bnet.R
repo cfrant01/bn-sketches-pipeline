@@ -113,6 +113,23 @@ ensure_dir <- function(path) {
   }
 }
 
+cleanup_trace_outputs <- function(out_dir, prefix, suffix) {
+  ensure_dir(out_dir)
+
+  suffix_escaped <- gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", suffix)
+  pattern <- paste0("^", prefix, "[0-9]+", suffix_escaped, "$")
+  old_files <- list.files(out_dir, pattern = pattern, full.names = TRUE)
+
+  if (length(old_files) > 0) {
+    removed <- file.remove(old_files)
+    if (!all(removed)) {
+      failed <- old_files[!removed]
+      stop(sprintf("Failed to remove stale trace files: %s", paste(failed, collapse = ", ")))
+    }
+    cat("Removed", length(old_files), "stale trace file(s).\n")
+  }
+}
+
 write_traces <- function(time_series, genes, out_dir, prefix, suffix, write_header) {
   ensure_dir(out_dir)
 
@@ -139,89 +156,6 @@ write_traces <- function(time_series, genes, out_dir, prefix, suffix, write_head
   }
 }
 
-write_text_dump <- function(path, object, label = NULL) {
-  lines <- capture.output({
-    if (!is.null(label)) cat(label, "\n")
-    print(object)
-  })
-  writeLines(lines, path)
-  cat("Wrote:", path, "\n")
-}
-
-extract_fixed_points_rows <- function(attractor_obj, gene_names) {
-  fixed_rows <- list()
-
-  if (is.null(attractor_obj$attractors)) {
-    return(fixed_rows)
-  }
-
-  for (att in attractor_obj$attractors) {
-    cycle_length <- NA_integer_
-    if (!is.null(att$cycleLength)) cycle_length <- suppressWarnings(as.integer(att$cycleLength))
-    if (is.na(cycle_length)) {
-      if (!is.null(att$involvedStates) && is.matrix(att$involvedStates)) {
-        cycle_length <- ncol(att$involvedStates)
-      } else {
-        next
-      }
-    }
-    if (cycle_length != 1) next
-
-    state_matrix <- NULL
-    if (!is.null(att$involvedStates) && is.matrix(att$involvedStates)) {
-      state_matrix <- att$involvedStates
-    } else if (!is.null(att$stateInfo) && is.matrix(att$stateInfo)) {
-      state_matrix <- att$stateInfo
-    }
-    if (is.null(state_matrix)) next
-
-    state <- state_matrix[, 1]
-    if (length(state) == length(gene_names)) {
-      names(state) <- gene_names
-    }
-    fixed_rows[[length(fixed_rows) + 1]] <- state
-  }
-
-  fixed_rows
-}
-
-write_fixed_points <- function(attractor_obj, out_path, gene_names) {
-  fixed_rows <- extract_fixed_points_rows(attractor_obj, gene_names)
-
-  if (length(fixed_rows) == 0) {
-    writeLines("No fixed points found (or could not extract them from BoolNet attractor object).", out_path)
-    cat("Wrote:", out_path, "\n")
-    return()
-  }
-
-  normalized_rows <- lapply(fixed_rows, function(state) {
-    values <- as.integer(state)
-    if (length(values) != length(gene_names)) {
-      return(NULL)
-    }
-    values
-  })
-  normalized_rows <- Filter(Negate(is.null), normalized_rows)
-
-  if (length(normalized_rows) == 0) {
-    writeLines(
-      "Fixed points were detected by BoolNet, but their state vectors could not be exported in tabular form.",
-      out_path
-    )
-    cat("Wrote:", out_path, "\n")
-    return()
-  }
-
-  mat <- matrix(
-    unlist(normalized_rows, use.names = FALSE),
-    ncol = length(gene_names),
-    byrow = TRUE
-  )
-  colnames(mat) <- gene_names
-  write.table(mat, file = out_path, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
-  cat("Wrote:", out_path, "\n")
-}
-
 main <- function() {
   args <- parse_args(commandArgs(trailingOnly = TRUE))
   if (is.null(args$bnet) || is.null(args$config)) {
@@ -242,10 +176,6 @@ main <- function() {
   write_header <- cfg_get_bool(cfg, c("write_trajectory_header"), FALSE)
   write_genes_file <- cfg_get_bool(cfg, c("write_genes_file"), TRUE)
 
-  find_attractors <- cfg_get_bool(cfg, c("find_attractors"), FALSE)
-  find_fixed_points <- cfg_get_bool(cfg, c("find_fixed_points"), FALSE)
-  attractor_type <- cfg_get(cfg, c("attractor_update_type"), update_type)
-
   seed_value <- cfg_get_int(cfg, c("seed"), NULL)
   if (!is.null(seed_value)) {
     set.seed(seed_value)
@@ -256,9 +186,6 @@ main <- function() {
   if (num_measurements <= 0) stop("num_steps/num_measurements must be >= 1")
   if (!(tolower(update_type) %in% c("synchronous", "asynchronous"))) {
     stop("update_type must be 'synchronous' or 'asynchronous'")
-  }
-  if (!(tolower(attractor_type) %in% c("synchronous", "asynchronous"))) {
-    stop("attractor_update_type must be 'synchronous' or 'asynchronous'")
   }
 
   cat("Loading network:", args$bnet, "\n")
@@ -286,6 +213,7 @@ main <- function() {
     }
   }
 
+  cleanup_trace_outputs(output_dir, output_prefix, output_suffix)
   write_traces(ts, genes, output_dir, output_prefix, output_suffix, write_header)
 
   if (write_genes_file) {
@@ -293,21 +221,6 @@ main <- function() {
     genes_file <- file.path(output_dir, "genes.txt")
     writeLines(genes, genes_file)
     cat("Wrote:", genes_file, "\n")
-  }
-
-  if (find_attractors || find_fixed_points) {
-    cat("Computing attractors (type =", attractor_type, ")...\n")
-    attrs <- getAttractors(net, type = attractor_type)
-
-    if (find_attractors) {
-      attractor_file <- file.path(output_dir, "attractors_summary.txt")
-      write_text_dump(attractor_file, attrs, label = "BoolNet attractors")
-    }
-
-    if (find_fixed_points) {
-      fixed_points_file <- file.path(output_dir, "fixed_points.txt")
-      write_fixed_points(attrs, fixed_points_file, genes)
-    }
   }
 
   cat("Done.\n")

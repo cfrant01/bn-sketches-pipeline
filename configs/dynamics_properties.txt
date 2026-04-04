@@ -1,0 +1,14 @@
+# Parameters for biolqm_to_sketch_properties.py (key = value)
+
+fixpoints = outputs/dynamics/net_fixpoints.txt
+trapspaces = outputs/dynamics/net_trapspaces.txt
+output = outputs/sketch_parts/net_attractors_properties.aeon
+
+# Optional
+mode = both
+property_prefix_fixed = fixed_point
+property_prefix_trap = trap_space
+start_index = 1
+include_forbid_extra = false
+no_dedup = false
+no_properties_header = false
