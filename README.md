@@ -103,6 +103,14 @@ install.packages("BoolNet")
 - `bioLQM` for fixed-point and trap-space analysis
 - Rust/Cargo only if you want to run the Boolean Network Sketches inference binaries locally
 
+The repository includes a vendored bioLQM bundle under `tools/bioLQM/`, and the default sample config points to:
+
+```text
+tools/bioLQM/bioLQM.cmd
+```
+
+So on Windows, a fresh clone can use the bundled bioLQM launcher directly as long as Java is installed.
+
 ## Quick Start
 
 Run the whole pipeline from the pipeline config:
@@ -203,6 +211,7 @@ Controls random BNet generation through BoolForge.
 Notes:
 - `create_bnet.py` currently expects a BoolForge YAML config, not the older text-based random CLI shown in stale docs.
 - When `acyclic = true`, the script builds the wiring first and then hands it to BoolForge.
+- `create_bnet.py` imports the Python `boolforge` package directly. The `tools/boolforge/` folder is included as a local helper/reference copy, but you should still install the Python dependency from `requirements.txt`.
 
 ### `configs/traces.txt`
 
@@ -333,7 +342,7 @@ It accepts either CLI flags or a key-value config with:
 
 ## Known External Assumptions
 
-- `bioLQM` must be installed or available under `tools/bioLQM/`
+- Java must be available to run the bundled `tools/bioLQM/bioLQM.cmd`
 - R must have the `BoolNet` package installed
 - inference execution requires a local clone/build of the Boolean Network Sketches Rust repository
 

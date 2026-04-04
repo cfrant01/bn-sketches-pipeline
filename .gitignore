@@ -9,6 +9,8 @@ outputs/**
 !outputs/**/
 !outputs/**/.gitkeep
 diagrams/
+tools/bioLQM/pydeps/
+tools/boolforge/__pycache__/
 
 # Local OS/editor noise
 .DS_Store
