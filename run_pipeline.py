@@ -14,6 +14,7 @@ import argparse
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, Iterable
 
@@ -118,6 +119,26 @@ def filter_dynamic_property_file(
     return kept_any
 
 
+def write_overridden_kv_config(
+    source: Path,
+    overrides: Dict[str, str],
+    cwd: Path,
+) -> Path:
+    cfg = read_kv_config(source)
+    cfg.update(overrides)
+    handle = tempfile.NamedTemporaryFile(
+        "w",
+        suffix=".txt",
+        delete=False,
+        dir=str(cwd),
+        encoding="utf-8",
+    )
+    with handle:
+        for key, value in cfg.items():
+            handle.write(f"{key} = {value}\n")
+    return Path(handle.name)
+
+
 def build_create_bnet_command(args: argparse.Namespace, boolforge_config: Path) -> list[str]:
     return [args.python_cmd, str(SCRIPT_DIR / "create_bnet.py"), str(boolforge_config)]
 
@@ -204,6 +225,9 @@ def main() -> None:
     include_biolqm_trap_space_properties = cfg_get_bool(
         pipeline_cfg, "include_biolqm_trap_space_properties", True
     )
+    include_canalization_structure_annotations = cfg_get_bool(
+        pipeline_cfg, "include_canalization_structure_annotations", False
+    )
 
     trace_cfg = read_kv_config(trace_config)
     traces_props_cfg = read_kv_config(traces_properties_config)
@@ -228,7 +252,19 @@ def main() -> None:
     create_cmd = build_create_bnet_command(args, boolforge_config) if boolforge_config and existing_bnet_path is None else []
     trace_cmd = build_trace_command(args, bnet_output, trace_config)
     trace_props_cmd = build_trace_properties_command(args, traces_properties_config)
-    structure_cmd = build_structure_command(args, structure_config)
+    structure_cmd_config = structure_config
+    temp_structure_config: Path | None = None
+    if include_canalization_structure_annotations:
+        temp_structure_config = write_overridden_kv_config(
+            structure_config,
+            {
+                "infer_canalization_for_exact": "true",
+                "annotate_canalization_comments": "true",
+            },
+            cwd,
+        )
+        structure_cmd_config = temp_structure_config
+    structure_cmd = build_structure_command(args, structure_cmd_config)
     biolqm_analysis_cmd = build_biolqm_analysis_command(args, biolqm_dynamics_config)
     biolqm_properties_cmd = build_biolqm_properties_command(args, biolqm_properties_config)
 
@@ -249,6 +285,10 @@ def main() -> None:
     print(f"2) generate traces using config -> {trace_config}")
     print(f"3) trace properties -> {trace_properties_output}")
     print(f"4) model structure -> {structure_output}")
+    print(
+        "   canalization annotations in structure -> "
+        + ("enabled" if include_canalization_structure_annotations else "disabled")
+    )
     if skip_attractor_properties:
         print("5) bioLQM dynamics/property generation -> skipped")
     else:
@@ -331,6 +371,9 @@ def main() -> None:
             run_cmd(combine_cmd, cwd)
 
     print("\nPipeline completed successfully.")
+
+    if temp_structure_config is not None:
+        temp_structure_config.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

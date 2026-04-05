@@ -5,7 +5,7 @@ Pipeline for generating Boolean networks, traces, sketch parts, and a final AEON
 The current pipeline supports four sketch-information categories:
 - influence graph information
 - partially specified Boolean network structure
-- update-function properties (currently monotonicity/sign inference for exact rules)
+- update-function properties (currently monotonicity/sign inference and optional canalization annotations for exact rules)
 - dynamic properties from traces and bioLQM
 
 ## What The Pipeline Produces
@@ -103,14 +103,6 @@ install.packages("BoolNet")
 - `bioLQM` for fixed-point and trap-space analysis
 - Rust/Cargo only if you want to run the Boolean Network Sketches inference binaries locally
 
-The repository includes a vendored bioLQM bundle under `tools/bioLQM/`, and the default sample config points to:
-
-```text
-tools/bioLQM/bioLQM.cmd
-```
-
-So on Windows, a fresh clone can use the bundled bioLQM launcher directly as long as Java is installed.
-
 ## Quick Start
 
 Run the whole pipeline from the pipeline config:
@@ -175,6 +167,7 @@ Controls which stage configs are used and which property families are included i
 | `include_trace_cycle_candidate_properties` | Include `trace_cycle_candidate_*` properties in the final sketch. |
 | `include_biolqm_fixed_point_properties` | Include `fixed_point_*` properties in the final sketch. |
 | `include_biolqm_trap_space_properties` | Include `trap_space_*` properties in the final sketch. |
+| `include_canalization_structure_annotations` | Enable canalization detection/comments during the structure step for exact revealed rules. |
 
 Also supported by `run_pipeline.py`, but not used in the default sample:
 
@@ -211,7 +204,6 @@ Controls random BNet generation through BoolForge.
 Notes:
 - `create_bnet.py` currently expects a BoolForge YAML config, not the older text-based random CLI shown in stale docs.
 - When `acyclic = true`, the script builds the wiring first and then hands it to BoolForge.
-- `create_bnet.py` imports the Python `boolforge` package directly. The `tools/boolforge/` folder is included as a local helper/reference copy, but you should still install the Python dependency from `requirements.txt`.
 
 ### `configs/traces.txt`
 
@@ -284,6 +276,9 @@ Controls which parts of the generated BNet become visible in the sketch `## MODE
 | `positive_edge_op` | Edge operator used for inferred positive monotone regulation. |
 | `negative_edge_op` | Edge operator used for inferred negative monotone regulation. |
 | `ambiguous_edge_op` | Edge operator used for inferred essential but sign-ambiguous regulation. |
+| `infer_canalization_for_exact` | If true, detect canalizing variables for exactly revealed rules using BoolForge. |
+| `annotate_canalization_comments` | If true, write detected canalization as comments in the `## MODEL` section. |
+| `canalization_output` | Path for the canalization report file. |
 
 ### `configs/dynamics.txt`
 
@@ -342,7 +337,7 @@ It accepts either CLI flags or a key-value config with:
 
 ## Known External Assumptions
 
-- Java must be available to run the bundled `tools/bioLQM/bioLQM.cmd`
+- `bioLQM` must be installed or available under `tools/bioLQM/`
 - R must have the `BoolNet` package installed
 - inference execution requires a local clone/build of the Boolean Network Sketches Rust repository
 

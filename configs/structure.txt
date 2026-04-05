@@ -8,8 +8,8 @@ output = outputs/sketch_parts/net_model_part.aeon
 # `reveal_functions_percent` + `reveal_regulators_percent` reveal support only.
 # `reveal_exact_functions_percent` reveals the exact Boolean rule for that percentage
 # of targets and overrides support-only reveal for those targets.
-reveal_functions_percent = 50
-reveal_regulators_percent = 50
+reveal_functions_percent = 100
+reveal_regulators_percent = 100
 reveal_exact_functions_percent = 50
 
 # Optional
@@ -20,3 +20,6 @@ infer_monotonicity_for_exact = true
 positive_edge_op = ->
 negative_edge_op = -|
 ambiguous_edge_op = -?
+infer_canalization_for_exact = true
+annotate_canalization_comments = true
+canalization_output = outputs/dynamics/net_canalization.txt

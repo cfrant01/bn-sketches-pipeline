@@ -28,6 +28,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
+from boolforge.boolean_function import BooleanFunction
+
 
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -96,6 +98,35 @@ def classify_regulation_edges(
             edge_ops[regulator] = ambiguous_op
 
     return edge_ops
+
+
+def build_truth_table(expr: str, regulators: Sequence[str]) -> List[int]:
+    if not regulators:
+        compiled_expr = compile_boolean_expr(expr)
+        return [int(evaluate_boolean_expr(compiled_expr, {}))]
+
+    compiled_expr = compile_boolean_expr(expr)
+    truth_table: List[int] = []
+    for bits in itertools.product([False, True], repeat=len(regulators)):
+        assignment = dict(zip(regulators, bits))
+        truth_table.append(int(evaluate_boolean_expr(compiled_expr, assignment)))
+    return truth_table
+
+
+def analyze_canalization(expr: str, regulators: Sequence[str]) -> List[Tuple[str, int, int]]:
+    if not regulators:
+        return []
+
+    bf = BooleanFunction(build_truth_table(expr, regulators))
+    properties = bf.get_layer_structure()
+    order = list(properties.get("OrderOfCanalizingVariables", []))
+    can_inputs = list(properties.get("CanalizingInputs", []))
+    can_outputs = list(properties.get("CanalizedOutputs", []))
+
+    return [
+        (regulators[int(idx)], int(can_input), int(can_output))
+        for idx, can_input, can_output in zip(order, can_inputs, can_outputs)
+    ]
 
 
 def read_kv_config(path: Path) -> dict[str, str]:
@@ -217,7 +248,9 @@ def build_model_section(
     positive_edge_op: str,
     negative_edge_op: str,
     ambiguous_edge_op: str,
-) -> List[str]:
+    infer_canalization_for_exact: bool,
+    annotate_canalization_comments: bool,
+) -> Tuple[List[str], List[str]]:
     if not (0 <= reveal_functions_percent <= 100):
         raise ValueError("--reveal-functions-percent must be between 0 and 100.")
     if not (0 <= reveal_regulators_percent <= 100):
@@ -234,6 +267,7 @@ def build_model_section(
     exact_targets = set(choose_subset(targets, reveal_exact_functions_percent, rng))
 
     lines = ["## MODEL"]
+    canalization_report_lines: List[str] = []
 
     for target in targets:
         full_regs = supports[target]
@@ -260,10 +294,27 @@ def build_model_section(
             if is_exact and infer_monotonicity_for_exact
             else {}
         )
+        canalization_data = (
+            analyze_canalization(expr_map[target], full_regs)
+            if is_exact and infer_canalization_for_exact
+            else []
+        )
 
         for reg in edge_regs:
             reg_edge_op = exact_edge_ops.get(reg, edge_op)
             lines.append(f"{reg} {reg_edge_op} {target}")
+
+        if canalization_data:
+            for regulator, can_input, can_output in canalization_data:
+                canalization_report_lines.append(
+                    f"{target}: {regulator}={can_input} => {target}={can_output}"
+                )
+            if annotate_canalization_comments:
+                details = ", ".join(
+                    f"{regulator}={can_input} => {target}={can_output}"
+                    for regulator, can_input, can_output in canalization_data
+                )
+                lines.append(f"# canalization {target}: {details}")
 
         if is_exact:
             lines.append(f"${target}:{expr_map[target]}")
@@ -282,7 +333,7 @@ def build_model_section(
             else:
                 raise ValueError(f"Unsupported hidden policy: {hidden_policy}")
 
-    return lines
+    return lines, canalization_report_lines
 
 
 def main() -> None:
@@ -342,6 +393,20 @@ def main() -> None:
         default="-?",
         help="Edge operator used for essential but sign-ambiguous regulations inferred from exact rules.",
     )
+    parser.add_argument(
+        "--infer-canalization-for-exact",
+        action="store_true",
+        help="Detect canalizing variables for exactly revealed Boolean rules using boolforge.",
+    )
+    parser.add_argument(
+        "--annotate-canalization-comments",
+        action="store_true",
+        help="Annotate exact revealed rules with canalization comments in the sketch model section.",
+    )
+    parser.add_argument(
+        "--canalization-output",
+        help="Optional report file for canalization detected in exactly revealed Boolean rules.",
+    )
     args = parser.parse_args()
     base_dir = Path(__file__).resolve().parent
     cfg = read_kv_config(Path(args.config)) if args.config else {}
@@ -391,13 +456,30 @@ def main() -> None:
         if arg_was_passed("--ambiguous-edge-op")
         else cfg_get_str(cfg, "ambiguous_edge_op", args.ambiguous_edge_op)
     )
+    infer_canalization_for_exact = (
+        args.infer_canalization_for_exact
+        if arg_was_passed("--infer-canalization-for-exact")
+        else str(cfg_get_str(cfg, "infer_canalization_for_exact", "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    annotate_canalization_comments = (
+        args.annotate_canalization_comments
+        if arg_was_passed("--annotate-canalization-comments")
+        else str(cfg_get_str(cfg, "annotate_canalization_comments", "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    canalization_output_value = (
+        args.canalization_output
+        if args.canalization_output is not None
+        else cfg_get_str(cfg, "canalization_output", None)
+    )
 
     if not bnet_path or not output_path_value:
         parser.error("Provide --config with bnet/output keys, or pass --bnet and --output.")
 
     rules = parse_bnet(resolve_user_path(bnet_path, base_dir))
     supports = extract_regulators(rules)
-    lines = build_model_section(
+    lines, canalization_report_lines = build_model_section(
         rules=rules,
         supports=supports,
         reveal_functions_percent=float(reveal_functions_percent),
@@ -410,11 +492,22 @@ def main() -> None:
         positive_edge_op=str(positive_edge_op),
         negative_edge_op=str(negative_edge_op),
         ambiguous_edge_op=str(ambiguous_edge_op),
+        infer_canalization_for_exact=bool(infer_canalization_for_exact),
+        annotate_canalization_comments=bool(annotate_canalization_comments),
     )
 
     out_path = resolve_user_path(output_path_value, base_dir)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    if canalization_output_value:
+        canalization_output_path = resolve_user_path(canalization_output_value, base_dir)
+        canalization_output_path.parent.mkdir(parents=True, exist_ok=True)
+        if canalization_report_lines:
+            text = "\n".join(canalization_report_lines) + "\n"
+        else:
+            text = "NO RESULTS\n"
+        canalization_output_path.write_text(text, encoding="utf-8")
 
     total_targets = len(supports)
     total_regs = sum(len(v) for v in supports.values())
@@ -424,9 +517,12 @@ def main() -> None:
     print(f"Reveal regulators percent: {reveal_regulators_percent}")
     print(f"Reveal exact functions percent: {reveal_exact_functions_percent}")
     print(f"Infer monotonicity for exact rules: {infer_monotonicity_for_exact}")
+    print(f"Infer canalization for exact rules: {infer_canalization_for_exact}")
     if seed is not None:
         print(f"Seed: {seed}")
     print(f"Output: {out_path}")
+    if canalization_output_value:
+        print(f"Canalization output: {resolve_user_path(canalization_output_value, base_dir)}")
 
 
 if __name__ == "__main__":
