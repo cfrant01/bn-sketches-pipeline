@@ -129,6 +129,50 @@ def analyze_canalization(expr: str, regulators: Sequence[str]) -> List[Tuple[str
     ]
 
 
+def build_canalization_template(
+    target: str,
+    visible_regulators: Sequence[str],
+    canalization_data: Sequence[Tuple[str, int, int]],
+) -> str | None:
+    if not visible_regulators or not canalization_data:
+        return None
+
+    chosen: Tuple[str, int, int] | None = None
+    for regulator, can_input, can_output in canalization_data:
+        if regulator in visible_regulators:
+            chosen = (regulator, can_input, can_output)
+            break
+    if chosen is None:
+        return None
+
+    regulator, can_input, can_output = chosen
+    remaining = [reg for reg in visible_regulators if reg != regulator]
+    literal = regulator if can_input == 1 else f"!{regulator}"
+
+    if not remaining:
+        if can_output == 1:
+            return literal
+        return f"!{literal}" if not literal.startswith("!") else literal[1:]
+
+    residual_symbol = f"g_{target}(" + ", ".join(remaining) + ")"
+    if can_output == 1:
+        return f"{literal} | {residual_symbol}"
+
+    anti_literal = f"!{regulator}" if can_input == 1 else regulator
+    return f"{anti_literal} & {residual_symbol}"
+
+
+def analyze_essentiality(expr: str, regulators: Sequence[str]) -> Tuple[List[str], List[str]]:
+    if not regulators:
+        return [], []
+
+    bf = BooleanFunction(build_truth_table(expr, regulators))
+    essential_indices = set(int(idx) for idx in bf.get_essential_variables())
+    essential = [regulators[i] for i in range(len(regulators)) if i in essential_indices]
+    non_essential = [regulators[i] for i in range(len(regulators)) if i not in essential_indices]
+    return essential, non_essential
+
+
 def read_kv_config(path: Path) -> dict[str, str]:
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
@@ -249,8 +293,12 @@ def build_model_section(
     negative_edge_op: str,
     ambiguous_edge_op: str,
     infer_canalization_for_exact: bool,
+    apply_canalization_templates: bool,
     annotate_canalization_comments: bool,
-) -> Tuple[List[str], List[str]]:
+    infer_essentiality: bool,
+    apply_essentiality_to_symbolic_supports: bool,
+    annotate_essentiality_comments: bool,
+) -> Tuple[List[str], List[str], List[str]]:
     if not (0 <= reveal_functions_percent <= 100):
         raise ValueError("--reveal-functions-percent must be between 0 and 100.")
     if not (0 <= reveal_regulators_percent <= 100):
@@ -268,12 +316,19 @@ def build_model_section(
 
     lines = ["## MODEL"]
     canalization_report_lines: List[str] = []
+    essentiality_report_lines: List[str] = []
 
     for target in targets:
         full_regs = supports[target]
         is_exact = target in exact_targets
         is_hidden = (target not in revealed_targets) and not is_exact
-        regs_to_reveal = list(full_regs) if is_exact else ([] if is_hidden else choose_subset(full_regs, reveal_regulators_percent, rng))
+        essential_regs, non_essential_regs = (
+            analyze_essentiality(expr_map[target], full_regs)
+            if infer_essentiality
+            else (list(full_regs), [])
+        )
+        reveal_pool = essential_regs if (apply_essentiality_to_symbolic_supports and not is_exact) else full_regs
+        regs_to_reveal = list(full_regs) if is_exact else ([] if is_hidden else choose_subset(reveal_pool, reveal_regulators_percent, rng))
 
         edge_regs = regs_to_reveal
         if not regs_to_reveal and hidden_policy == "omit":
@@ -282,7 +337,7 @@ def build_model_section(
             # the hidden target maximally unconstrained instead of silently removing it.
             edge_regs = all_variables
 
-        exact_edge_ops = (
+        inferred_edge_ops = (
             classify_regulation_edges(
                 expr=expr_map[target],
                 regulators=full_regs,
@@ -291,17 +346,17 @@ def build_model_section(
                 ambiguous_op=ambiguous_edge_op,
                 optional_op=edge_op,
             )
-            if is_exact and infer_monotonicity_for_exact
+            if infer_monotonicity_for_exact
             else {}
         )
         canalization_data = (
             analyze_canalization(expr_map[target], full_regs)
-            if is_exact and infer_canalization_for_exact
+            if infer_canalization_for_exact
             else []
         )
 
         for reg in edge_regs:
-            reg_edge_op = exact_edge_ops.get(reg, edge_op)
+            reg_edge_op = inferred_edge_ops.get(reg, edge_op)
             lines.append(f"{reg} {reg_edge_op} {target}")
 
         if canalization_data:
@@ -316,11 +371,30 @@ def build_model_section(
                 )
                 lines.append(f"# canalization {target}: {details}")
 
+        if infer_essentiality:
+            essential_text = ",".join(essential_regs) if essential_regs else "-"
+            non_essential_text = ",".join(non_essential_regs) if non_essential_regs else "-"
+            essentiality_report_lines.append(
+                f"{target}: essential={essential_text}; non_essential={non_essential_text}"
+            )
+            if annotate_essentiality_comments and (essential_regs or non_essential_regs):
+                lines.append(
+                    f"# essentiality {target}: essential={essential_text}; non_essential={non_essential_text}"
+                )
+
         if is_exact:
             lines.append(f"${target}:{expr_map[target]}")
         elif regs_to_reveal:
-            args = ", ".join(regs_to_reveal)
-            lines.append(f"${target}:f_{target}({args})")
+            canalization_template = (
+                build_canalization_template(target, regs_to_reveal, canalization_data)
+                if apply_canalization_templates
+                else None
+            )
+            if canalization_template is not None:
+                lines.append(f"${target}:{canalization_template}")
+            else:
+                args = ", ".join(regs_to_reveal)
+                lines.append(f"${target}:f_{target}({args})")
         else:
             # Nothing revealed for this function support.
             if hidden_policy == "omit":
@@ -333,7 +407,7 @@ def build_model_section(
             else:
                 raise ValueError(f"Unsupported hidden policy: {hidden_policy}")
 
-    return lines, canalization_report_lines
+    return lines, canalization_report_lines, essentiality_report_lines
 
 
 def main() -> None:
@@ -404,8 +478,32 @@ def main() -> None:
         help="Annotate exact revealed rules with canalization comments in the sketch model section.",
     )
     parser.add_argument(
+        "--apply-canalization-templates",
+        action="store_true",
+        help="For symbolic (non-exact) targets, emit a partial canalization template when a visible canalizing regulator is known.",
+    )
+    parser.add_argument(
         "--canalization-output",
         help="Optional report file for canalization detected in exactly revealed Boolean rules.",
+    )
+    parser.add_argument(
+        "--infer-essentiality",
+        action="store_true",
+        help="Detect essential and non-essential regulators from .bnet rules using boolforge.",
+    )
+    parser.add_argument(
+        "--apply-essentiality-to-symbolic-supports",
+        action="store_true",
+        help="For symbolic (non-exact) targets, reveal only essential regulators when essentiality is enabled.",
+    )
+    parser.add_argument(
+        "--annotate-essentiality-comments",
+        action="store_true",
+        help="Annotate essential/non-essential regulators as comments in the sketch model section.",
+    )
+    parser.add_argument(
+        "--essentiality-output",
+        help="Optional report file for essentiality detected from Boolean rules.",
     )
     args = parser.parse_args()
     base_dir = Path(__file__).resolve().parent
@@ -468,10 +566,39 @@ def main() -> None:
         else str(cfg_get_str(cfg, "annotate_canalization_comments", "false")).strip().lower()
         in {"1", "true", "yes", "on"}
     )
+    apply_canalization_templates = (
+        args.apply_canalization_templates
+        if arg_was_passed("--apply-canalization-templates")
+        else str(cfg_get_str(cfg, "apply_canalization_templates", "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
     canalization_output_value = (
         args.canalization_output
         if args.canalization_output is not None
         else cfg_get_str(cfg, "canalization_output", None)
+    )
+    infer_essentiality = (
+        args.infer_essentiality
+        if arg_was_passed("--infer-essentiality")
+        else str(cfg_get_str(cfg, "infer_essentiality", "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    apply_essentiality_to_symbolic_supports = (
+        args.apply_essentiality_to_symbolic_supports
+        if arg_was_passed("--apply-essentiality-to-symbolic-supports")
+        else str(cfg_get_str(cfg, "apply_essentiality_to_symbolic_supports", "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    annotate_essentiality_comments = (
+        args.annotate_essentiality_comments
+        if arg_was_passed("--annotate-essentiality-comments")
+        else str(cfg_get_str(cfg, "annotate_essentiality_comments", "false")).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    essentiality_output_value = (
+        args.essentiality_output
+        if args.essentiality_output is not None
+        else cfg_get_str(cfg, "essentiality_output", None)
     )
 
     if not bnet_path or not output_path_value:
@@ -479,7 +606,7 @@ def main() -> None:
 
     rules = parse_bnet(resolve_user_path(bnet_path, base_dir))
     supports = extract_regulators(rules)
-    lines, canalization_report_lines = build_model_section(
+    lines, canalization_report_lines, essentiality_report_lines = build_model_section(
         rules=rules,
         supports=supports,
         reveal_functions_percent=float(reveal_functions_percent),
@@ -493,7 +620,11 @@ def main() -> None:
         negative_edge_op=str(negative_edge_op),
         ambiguous_edge_op=str(ambiguous_edge_op),
         infer_canalization_for_exact=bool(infer_canalization_for_exact),
+        apply_canalization_templates=bool(apply_canalization_templates),
         annotate_canalization_comments=bool(annotate_canalization_comments),
+        infer_essentiality=bool(infer_essentiality),
+        apply_essentiality_to_symbolic_supports=bool(apply_essentiality_to_symbolic_supports),
+        annotate_essentiality_comments=bool(annotate_essentiality_comments),
     )
 
     out_path = resolve_user_path(output_path_value, base_dir)
@@ -509,6 +640,15 @@ def main() -> None:
             text = "NO RESULTS\n"
         canalization_output_path.write_text(text, encoding="utf-8")
 
+    if essentiality_output_value:
+        essentiality_output_path = resolve_user_path(essentiality_output_value, base_dir)
+        essentiality_output_path.parent.mkdir(parents=True, exist_ok=True)
+        if essentiality_report_lines:
+            text = "\n".join(essentiality_report_lines) + "\n"
+        else:
+            text = "NO RESULTS\n"
+        essentiality_output_path.write_text(text, encoding="utf-8")
+
     total_targets = len(supports)
     total_regs = sum(len(v) for v in supports.values())
     print(f"Targets: {total_targets}")
@@ -518,11 +658,16 @@ def main() -> None:
     print(f"Reveal exact functions percent: {reveal_exact_functions_percent}")
     print(f"Infer monotonicity for exact rules: {infer_monotonicity_for_exact}")
     print(f"Infer canalization for exact rules: {infer_canalization_for_exact}")
+    print(f"Apply canalization templates: {apply_canalization_templates}")
+    print(f"Infer essentiality: {infer_essentiality}")
+    print(f"Apply essentiality to symbolic supports: {apply_essentiality_to_symbolic_supports}")
     if seed is not None:
         print(f"Seed: {seed}")
     print(f"Output: {out_path}")
     if canalization_output_value:
         print(f"Canalization output: {resolve_user_path(canalization_output_value, base_dir)}")
+    if essentiality_output_value:
+        print(f"Essentiality output: {resolve_user_path(essentiality_output_value, base_dir)}")
 
 
 if __name__ == "__main__":
