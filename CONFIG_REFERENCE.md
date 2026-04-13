@@ -30,6 +30,8 @@ Keys:
 - `include_trace_cycle_candidate_properties`
 - `include_biolqm_fixed_point_properties`
 - `include_biolqm_trap_space_properties`
+- `include_essentiality_structure_constraints`
+- `include_canalization_structure_annotations`
 
 Also supported by the script:
 - `existing_bnet`
@@ -112,6 +114,21 @@ Keys:
 - `positive_edge_op`
 - `negative_edge_op`
 - `ambiguous_edge_op`
+- `infer_essentiality`
+- `apply_essentiality_to_symbolic_supports`
+- `annotate_essentiality_comments`
+- `essentiality_output`
+- `infer_canalization_for_exact`
+- `apply_canalization_templates`
+- `annotate_canalization_comments`
+- `canalization_output`
+
+Notes:
+- `infer_monotonicity_for_exact` now controls sign inference from source Boolean rules for revealed targets when the sign can be inferred; the name is kept for backward compatibility with older configs.
+- `infer_essentiality` detects essential and non-essential regulators from the source Boolean rule using the vendored `tools/boolnetanalyzer` helper module.
+- `apply_essentiality_to_symbolic_supports` restricts symbolic supports to essential regulators only.
+- `apply_canalization_templates` allows symbolic rules to be emitted as partial canalization templates instead of plain `f_target(...)` placeholders when a visible canalizing regulator is available.
+- Canalization detection is based on the vendored `tools/boolnetanalyzer` helper module, while the canalizing input/output pair used in the template is derived locally from the truth table of the source Boolean rule.
 
 ### `configs/dynamics.txt`
 Used by: `analyze_dynamics_biolqm.py`

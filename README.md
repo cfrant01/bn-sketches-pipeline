@@ -5,7 +5,7 @@ Pipeline for generating Boolean networks, traces, sketch parts, and a final AEON
 The current pipeline supports four sketch-information categories:
 - influence graph information
 - partially specified Boolean network structure
-- update-function properties (currently monotonicity/sign inference and optional canalization annotations for exact rules)
+- update-function properties (monotonicity/sign inference, essentiality-aware support restriction, and optional canalization templates/annotations)
 - dynamic properties from traces and bioLQM
 
 ## What The Pipeline Produces
@@ -133,7 +133,11 @@ python ".\Sketches pipeline\run_pipeline.py" --config ".\Sketches pipeline\confi
 - partial revealing/hiding of model support
 
 ### 3. Update-function properties
-- monotonicity/sign inference for exactly revealed Boolean rules, encoded directly on AEON edges
+- monotonicity/sign inference from source Boolean rules, encoded on AEON edges for revealed targets when the sign can be inferred
+- essentiality detection from source Boolean rules using the vendored `tools/boolnetanalyzer` helper module
+- essentiality can affect the sketch structurally by restricting symbolic non-exact rules to essential regulators only
+- canalization detection from source Boolean rules using the vendored `tools/boolnetanalyzer` helper module
+- canalization can affect the sketch structurally by rewriting symbolic rules into partial canalization templates when possible
 
 ### 4. Dynamic properties
 - trace-derived reachability properties
@@ -167,6 +171,7 @@ Controls which stage configs are used and which property families are included i
 | `include_trace_cycle_candidate_properties` | Include `trace_cycle_candidate_*` properties in the final sketch. |
 | `include_biolqm_fixed_point_properties` | Include `fixed_point_*` properties in the final sketch. |
 | `include_biolqm_trap_space_properties` | Include `trap_space_*` properties in the final sketch. |
+| `include_essentiality_structure_constraints` | Enable essentiality detection and essential-regulator-only symbolic supports during the structure step. |
 | `include_canalization_structure_annotations` | Enable canalization detection/comments during the structure step for exact revealed rules. |
 
 Also supported by `run_pipeline.py`, but not used in the default sample:
@@ -272,11 +277,16 @@ Controls which parts of the generated BNet become visible in the sketch `## MODE
 | `seed` | Random seed for reveal choices. |
 | `edge_op` | Default AEON edge operator for unconstrained edges, usually `-??`. |
 | `hidden_policy` | How to represent functions with nothing revealed: `omit`, `question`, or `self`. |
-| `infer_monotonicity_for_exact` | If true, infer regulator signs for exactly revealed rules and write `->`, `-|`, or `-?` edges. |
+| `infer_monotonicity_for_exact` | If true, infer regulator signs from the source Boolean rules and write `->`, `-|`, or `-?` edges for revealed targets when possible. |
 | `positive_edge_op` | Edge operator used for inferred positive monotone regulation. |
 | `negative_edge_op` | Edge operator used for inferred negative monotone regulation. |
 | `ambiguous_edge_op` | Edge operator used for inferred essential but sign-ambiguous regulation. |
+| `infer_essentiality` | If true, detect essential and non-essential regulators from the Boolean rules. |
+| `apply_essentiality_to_symbolic_supports` | If true, symbolic non-exact rules reveal only essential regulators. |
+| `annotate_essentiality_comments` | If true, write essential/non-essential regulator comments in the `## MODEL` section. |
+| `essentiality_output` | Path for the essentiality report file. |
 | `infer_canalization_for_exact` | If true, detect canalizing variables for exactly revealed rules using BoolForge. |
+| `apply_canalization_templates` | If true, emit partial canalization templates for symbolic rules when a visible canalizing regulator is known. |
 | `annotate_canalization_comments` | If true, write detected canalization as comments in the `## MODEL` section. |
 | `canalization_output` | Path for the canalization report file. |
 
