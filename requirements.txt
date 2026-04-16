@@ -1,6 +1,5 @@
-networkx>=3.2
 boolforge
+networkx>=3.2
 numpy>=1.26
 PyYAML>=6.0
 sympy>=1.13
-matplotlib>=3.8

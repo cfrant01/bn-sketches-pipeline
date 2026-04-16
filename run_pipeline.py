@@ -20,9 +20,11 @@ from typing import Dict, Iterable
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR
+SRC_DIR = PROJECT_ROOT / "src" if (PROJECT_ROOT / "src").exists() else PROJECT_ROOT
 DEFAULT_RSCRIPT = str(Path(r"C:\Program Files\R\R-4.3.2\bin\Rscript.exe")) if Path(r"C:\Program Files\R\R-4.3.2\bin\Rscript.exe").exists() else "Rscript"
-DEFAULT_BIOLQM_CMD = str(SCRIPT_DIR / "tools" / "bioLQM" / "bioLQM.cmd") if (SCRIPT_DIR / "tools" / "bioLQM" / "bioLQM.cmd").exists() else "bioLQM"
-DEFAULT_PIPELINE_CONFIG = str(SCRIPT_DIR / "configs" / "pipeline.txt")
+DEFAULT_BIOLQM_CMD = str(PROJECT_ROOT / "tools" / "bioLQM" / "bioLQM.cmd") if (PROJECT_ROOT / "tools" / "bioLQM" / "bioLQM.cmd").exists() else "bioLQM"
+DEFAULT_PIPELINE_CONFIG = str(PROJECT_ROOT / "configs" / "pipeline.txt")
 
 
 def quote_cmd(parts: list[str]) -> str:
@@ -140,13 +142,13 @@ def write_overridden_kv_config(
 
 
 def build_create_bnet_command(args: argparse.Namespace, boolforge_config: Path) -> list[str]:
-    return [args.python_cmd, str(SCRIPT_DIR / "create_bnet.py"), str(boolforge_config)]
+    return [args.python_cmd, str(SRC_DIR / "create_bnet.py"), str(boolforge_config)]
 
 
 def build_trace_command(args: argparse.Namespace, bnet_output: Path, trace_config: Path) -> list[str]:
     return [
         args.rscript_cmd,
-        str(SCRIPT_DIR / "generate_traces_from_bnet.R"),
+        str(SRC_DIR / "generate_traces_from_bnet.R"),
         "--bnet",
         str(bnet_output),
         "--config",
@@ -155,19 +157,19 @@ def build_trace_command(args: argparse.Namespace, bnet_output: Path, trace_confi
 
 
 def build_trace_properties_command(args: argparse.Namespace, traces_properties_config: Path) -> list[str]:
-    return [args.python_cmd, str(SCRIPT_DIR / "traces_to_sketch_properties.py"), "--config", str(traces_properties_config)]
+    return [args.python_cmd, str(SRC_DIR / "traces_to_sketch_properties.py"), "--config", str(traces_properties_config)]
 
 
 def build_structure_command(args: argparse.Namespace, structure_config: Path) -> list[str]:
-    return [args.python_cmd, str(SCRIPT_DIR / "bnet_to_sketchStructure.py"), "--config", str(structure_config)]
+    return [args.python_cmd, str(SRC_DIR / "bnet_to_sketchStructure.py"), "--config", str(structure_config)]
 
 
 def build_biolqm_analysis_command(args: argparse.Namespace, biolqm_dynamics_config: Path) -> list[str]:
-    return [args.python_cmd, str(SCRIPT_DIR / "analyze_dynamics_biolqm.py"), "--config", str(biolqm_dynamics_config)]
+    return [args.python_cmd, str(SRC_DIR / "analyze_dynamics_biolqm.py"), "--config", str(biolqm_dynamics_config)]
 
 
 def build_biolqm_properties_command(args: argparse.Namespace, biolqm_properties_config: Path) -> list[str]:
-    return [args.python_cmd, str(SCRIPT_DIR / "biolqm_to_sketch_properties.py"), "--config", str(biolqm_properties_config)]
+    return [args.python_cmd, str(SRC_DIR / "biolqm_to_sketch_properties.py"), "--config", str(biolqm_properties_config)]
 
 
 def parse_args() -> argparse.Namespace:
@@ -225,6 +227,9 @@ def main() -> None:
     include_biolqm_trap_space_properties = cfg_get_bool(
         pipeline_cfg, "include_biolqm_trap_space_properties", True
     )
+    include_essentiality_structure_constraints = cfg_get_bool(
+        pipeline_cfg, "include_essentiality_structure_constraints", False
+    )
     include_canalization_structure_annotations = cfg_get_bool(
         pipeline_cfg, "include_canalization_structure_annotations", False
     )
@@ -255,12 +260,28 @@ def main() -> None:
     structure_cmd_config = structure_config
     temp_structure_config: Path | None = None
     if include_canalization_structure_annotations:
+        if temp_structure_config is None:
+            temp_structure_config = structure_config
+    if include_essentiality_structure_constraints or include_canalization_structure_annotations:
+        overrides: Dict[str, str] = {}
+        if include_essentiality_structure_constraints:
+            overrides.update(
+                {
+                    "infer_essentiality": "true",
+                    "apply_essentiality_to_symbolic_supports": "true",
+                    "annotate_essentiality_comments": "true",
+                }
+            )
+        if include_canalization_structure_annotations:
+            overrides.update(
+                {
+                    "infer_canalization_for_exact": "true",
+                    "annotate_canalization_comments": "true",
+                }
+            )
         temp_structure_config = write_overridden_kv_config(
             structure_config,
-            {
-                "infer_canalization_for_exact": "true",
-                "annotate_canalization_comments": "true",
-            },
+            overrides,
             cwd,
         )
         structure_cmd_config = temp_structure_config
@@ -285,6 +306,10 @@ def main() -> None:
     print(f"2) generate traces using config -> {trace_config}")
     print(f"3) trace properties -> {trace_properties_output}")
     print(f"4) model structure -> {structure_output}")
+    print(
+        "   essentiality constraints in structure -> "
+        + ("enabled" if include_essentiality_structure_constraints else "disabled")
+    )
     print(
         "   canalization annotations in structure -> "
         + ("enabled" if include_canalization_structure_annotations else "disabled")
@@ -360,7 +385,7 @@ def main() -> None:
         else:
             combine_cmd = [
                 args.python_cmd,
-                str(SCRIPT_DIR / "combine_sketch_parts.py"),
+                str(SRC_DIR / "combine_sketch_parts.py"),
                 "--properties",
                 *combine_properties,
                 "--model",

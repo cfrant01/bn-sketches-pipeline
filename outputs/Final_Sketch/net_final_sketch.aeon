@@ -1,0 +1,163 @@
+## PROPERTIES
+# Generated from traces in: C:\Users\35797\OneDrive\Desktop\THESIS\PIPELINE-REPO\outputs\traces
+# Genes file: C:\Users\35797\OneDrive\Desktop\THESIS\PIPELINE-REPO\outputs\traces\genes.txt
+# Trace files matched: 10 (experiment*_modeled.txt)
+# Pair mode: endpoints
+# compress_stutter: True
+# Raw transitions: 10
+# After dedup: 10
+# Raw singleton traces: 0
+# Singleton traces after dedup: 0
+# Raw cycle candidates: 0
+# Cycle candidates after dedup: 0
+# keep_percent: 50.0
+# Final properties written: 5
+# max_chain_states: 6
+# partial_state_size: 5
+# partial_state_mode: random_per_property
+# partial_state_genes: varies_per_property
+# seed: 42
+#! dynamic_property: reachability_1: #`3{x}: ( @{x}: ( (~x4 & ~x8 & x9 & ~x12 & ~x17) & EF((~x4 & ~x8 & ~x9 & ~x12 & ~x17)) ) )`#
+#! dynamic_property: reachability_2: #`3{x}: ( @{x}: ( (x9 & x10 & x12 & x13 & ~x25) & EF((x9 & x10 & x12 & ~x13 & ~x25)) ) )`#
+#! dynamic_property: reachability_3: #`3{x}: ( @{x}: ( (x5 & ~x8 & x10 & ~x11 & x13) & EF((x5 & ~x8 & x10 & ~x11 & ~x13)) ) )`#
+#! dynamic_property: reachability_4: #`3{x}: ( @{x}: ( (x15 & x17 & ~x22 & ~x23 & x25) & EF((x15 & ~x17 & x22 & ~x23 & ~x25)) ) )`#
+#! dynamic_property: reachability_5: #`3{x}: ( @{x}: ( (~x1 & ~x3 & ~x14 & ~x15 & ~x24) & EF((x1 & ~x3 & x14 & ~x15 & ~x24)) ) )`#
+
+## MODEL
+x17 -? x1
+x3 -? x1
+x19 -| x1
+# essentiality x1: essential=x17,x3,x19; non_essential=-
+$x1:(x17 & !x3) | (x3 & !x17) | (!x17 & !x19)
+x20 -> x2
+x3 -> x2
+x18 -| x2
+# canalization x2: x20=1 => x2=1, x3=0 => x2=0, x18=1 => x2=0
+# essentiality x2: essential=x20,x3,x18; non_essential=-
+$x2:x20 | g_x2(x3, x18)
+x24 -| x3
+x13 -> x3
+x19 -| x3
+# canalization x3: x24=0 => x3=1, x13=0 => x3=0, x19=1 => x3=0
+# essentiality x3: essential=x24,x13,x19; non_essential=-
+$x3:!x24 | (x13 & !x19)
+x19 -> x4
+x13 -| x4
+x5 -| x4
+# canalization x4: x13=1 => x4=0, x19=1 => x4=1, x5=0 => x4=1
+# essentiality x4: essential=x19,x13,x5; non_essential=-
+$x4:(x19 & !x13) | (!x13 & !x5)
+x10 -> x5
+x13 -> x5
+x6 -> x5
+# canalization x5: x10=1 => x5=1, x13=1 => x5=1, x6=1 => x5=1
+# essentiality x5: essential=x10,x13,x6; non_essential=-
+$x5:x10 | x13 | x6
+x11 -? x6
+x21 -? x6
+x16 -? x6
+# essentiality x6: essential=x11,x21,x16; non_essential=-
+$x6:f_x6(x11, x21, x16)
+x6 -> x7
+x11 -> x7
+x3 -| x7
+# canalization x7: x6=1 => x7=1, x11=0 => x7=0, x3=1 => x7=0
+# essentiality x7: essential=x6,x11,x3; non_essential=-
+$x7:x6 | g_x7(x11, x3)
+x2 -? x8
+x25 -? x8
+x21 -? x8
+# essentiality x8: essential=x2,x25,x21; non_essential=-
+$x8:(x2 & x25) | (x25 & !x21) | (x21 & !x2 & !x25)
+x19 -> x9
+x4 -> x9
+x18 -| x9
+# canalization x9: x19=0 => x9=0, x4=1 => x9=1, x18=0 => x9=1
+# essentiality x9: essential=x19,x4,x18; non_essential=-
+$x9:(x19 & x4) | (x19 & !x18)
+x12 -? x10
+x25 -? x10
+x23 -| x10
+# essentiality x10: essential=x12,x25,x23; non_essential=-
+$x10:f_x10(x12, x25, x23)
+x9 -? x11
+x5 -| x11
+x18 -| x11
+# essentiality x11: essential=x9,x5,x18; non_essential=-
+$x11:f_x11(x9, x5, x18)
+x4 -? x12
+x14 -? x12
+x1 -> x12
+# essentiality x12: essential=x4,x14,x1; non_essential=-
+$x12:f_x12(x4, x14, x1)
+x19 -? x13
+x22 -? x13
+x9 -? x13
+# essentiality x13: essential=x19,x22,x9; non_essential=-
+$x13:f_x13(x19, x22, x9)
+x8 -? x14
+x9 -? x14
+x22 -> x14
+# essentiality x14: essential=x8,x9,x22; non_essential=-
+$x14:(x8 & x9) | (x22 & !x9) | (!x8 & !x9)
+x12 -> x15
+x19 -| x15
+x5 -| x15
+# canalization x15: x19=1 => x15=0, x12=1 => x15=1, x5=0 => x15=1
+# essentiality x15: essential=x12,x19,x5; non_essential=-
+$x15:(x12 & !x19) | (!x19 & !x5)
+x11 -? x16
+x8 -? x16
+x6 -> x16
+# essentiality x16: essential=x11,x8,x6; non_essential=-
+$x16:f_x16(x11, x8, x6)
+x11 -> x17
+x4 -? x17
+x22 -> x17
+# essentiality x17: essential=x11,x4,x22; non_essential=-
+$x17:f_x17(x11, x4, x22)
+x3 -> x18
+x8 -> x18
+x16 -| x18
+# canalization x18: x3=0 => x18=0, x8=1 => x18=1, x16=0 => x18=1
+# essentiality x18: essential=x3,x8,x16; non_essential=-
+$x18:x3 & g_x18(x8, x16)
+x10 -? x19
+x20 -> x19
+x22 -? x19
+# canalization x19: x20=0 => x19=0
+# essentiality x19: essential=x10,x20,x22; non_essential=-
+$x19:x20 & g_x19(x10, x22)
+x6 -? x20
+x7 -? x20
+x17 -? x20
+# essentiality x20: essential=x6,x7,x17; non_essential=-
+$x20:f_x20(x6, x7, x17)
+x20 -? x21
+x19 -? x21
+x5 -? x21
+# essentiality x21: essential=x20,x19,x5; non_essential=-
+$x21:(x20 & !x19) | (x20 & !x5) | (!x19 & !x5) | (x19 & x5 & !x20)
+x16 -| x22
+x18 -| x22
+x24 -| x22
+# canalization x22: x16=0 => x22=1, x18=0 => x22=1, x24=0 => x22=1
+# essentiality x22: essential=x16,x18,x24; non_essential=-
+$x22:!x16 | g_x22(x18, x24)
+x14 -? x23
+x7 -? x23
+x18 -? x23
+# essentiality x23: essential=x14,x7,x18; non_essential=-
+$x23:(x14 & x7) | (x14 & !x18) | (x18 & !x14 & !x7)
+x13 -| x24
+x4 -> x24
+x1 -| x24
+# canalization x24: x13=0 => x24=1, x4=0 => x24=0, x1=1 => x24=0
+# essentiality x24: essential=x13,x4,x1; non_essential=-
+$x24:!x13 | (x4 & !x1)
+x10 -> x25
+x16 -> x25
+x24 -| x25
+# canalization x25: x16=0 => x25=0, x10=1 => x25=1, x24=0 => x25=1
+# essentiality x25: essential=x10,x16,x24; non_essential=-
+$x25:(x10 & x16) | (x16 & !x24)

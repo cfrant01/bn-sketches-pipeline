@@ -1,9 +1,9 @@
 # Trace generation configuration (key = value)
 
 # Trace simulation
-num_traces = 100
-num_steps = 100
-update_type = synchronous
+num_traces = 10
+num_steps = 10
+update_type = asynchronous
 noise_level = 0.0
 seed = 42
 

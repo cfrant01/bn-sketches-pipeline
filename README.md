@@ -5,8 +5,20 @@ Pipeline for generating Boolean networks, traces, sketch parts, and a final AEON
 The current pipeline supports four sketch-information categories:
 - influence graph information
 - partially specified Boolean network structure
-- update-function properties (monotonicity/sign inference, essentiality-aware support restriction, and optional canalization templates/annotations)
+- update-function properties (currently monotonicity/sign inference and optional canalization annotations for exact rules)
 - dynamic properties from traces and bioLQM
+
+The repository entry point for the full workflow is:
+
+```text
+run_pipeline.py
+```
+
+The stage scripts it calls live under:
+
+```text
+src/
+```
 
 ## What The Pipeline Produces
 
@@ -46,42 +58,39 @@ That final sketch is assembled from:
   Active pipeline configuration files.
 - `outputs/`
   Generated BNet files, traces, sketch parts, combined sketch, and inference artifacts.
-- `create_bnet.py`
+- `src/create_bnet.py`
   Create a `.bnet` model from a BoolForge YAML config.
-- `generate_traces_from_bnet.R`
+- `src/generate_traces_from_bnet.R`
   Generate traces from a `.bnet` using BoolNet.
-- `traces_to_sketch_properties.py`
+- `src/traces_to_sketch_properties.py`
   Turn traces into sketch dynamic properties.
-- `bnet_to_sketchStructure.py`
+- `src/bnet_to_sketchStructure.py`
   Turn a `.bnet` into the sketch `## MODEL` section.
-- `analyze_dynamics_biolqm.py`
+- `src/analyze_dynamics_biolqm.py`
   Run bioLQM fixed-point and trap-space analyses.
-- `biolqm_to_sketch_properties.py`
+- `src/biolqm_to_sketch_properties.py`
   Turn raw bioLQM outputs into sketch properties.
-- `combine_sketch_parts.py`
+- `src/combine_sketch_parts.py`
   Merge the sketch parts into one AEON sketch.
 - `run_pipeline.py`
   Orchestrate the full flow from configs.
-- `run_sketch_inference.py`
-  Prepare generated sketch parts for the Boolean Network Sketches inference binary.
-- `generate_experiment_sketches.py`
-  Build batch experiment cases with multiple sketch levels.
-- `run_experiment_batch_inference.py`
-  Run inference repeatedly over generated experiment batches.
 
 ## Requirements
 
 ### Python
 
-Tested with Python 3.13. Install the Python dependencies with:
+Tested with Python 3.13 on Windows PowerShell. Install the Python dependencies with:
 
 ```powershell
+git clone <your-repo-url>
+cd PIPELINE-REPO
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Current Python requirements:
+The `requirements.txt` file covers the Python packages used by the pipeline scripts:
 - `boolforge`
 - `PyYAML`
 - `numpy`
@@ -98,23 +107,71 @@ Install it in R with:
 install.packages("BoolNet")
 ```
 
+The default launcher currently looks for:
+
+```text
+C:\Program Files\R\R-4.3.2\bin\Rscript.exe
+```
+
+If R is installed elsewhere, either:
+- edit the R path in `run_pipeline.py`, or
+- pass `--rscript-cmd` explicitly when running the pipeline.
+
 ### External tools
 
+- Java, because `tools/bioLQM/bioLQM.cmd` launches the bundled `bioLQM` JAR
 - `bioLQM` for fixed-point and trap-space analysis
 - Rust/Cargo only if you want to run the Boolean Network Sketches inference binaries locally
+
+This repository already includes a Windows `bioLQM` wrapper under:
+
+```text
+tools/bioLQM/bioLQM.cmd
+```
+
+So for the default configuration, you do not need a separate global `bioLQM` installation. You do still need `java` available on your `PATH`.
+
+### Fresh Clone Checklist
+
+For a new machine, make sure all of the following are available before running the pipeline:
+- Python 3.13
+- the packages in `requirements.txt`
+- R
+- the R package `BoolNet`
+- Java on `PATH`
+
+You can quickly verify the external tools with:
+
+```powershell
+python --version
+Rscript --version
+java -version
+```
 
 ## Quick Start
 
 Run the whole pipeline from the pipeline config:
 
 ```powershell
-python ".\Sketches pipeline\run_pipeline.py" --config ".\Sketches pipeline\configs\pipeline.txt"
+python run_pipeline.py --config configs\pipeline.txt
 ```
 
 Dry run:
 
 ```powershell
-python ".\Sketches pipeline\run_pipeline.py" --config ".\Sketches pipeline\configs\pipeline.txt" --dry-run
+python run_pipeline.py --config configs\pipeline.txt --dry-run
+```
+
+If your R installation is not at the default path:
+
+```powershell
+python run_pipeline.py --config configs\pipeline.txt --rscript-cmd "C:\Path\To\Rscript.exe"
+```
+
+After a successful run, the main output is:
+
+```text
+outputs/Final_Sketch/net_final_sketch.aeon
 ```
 
 ## Current Sketch Information That Can Be Included
@@ -133,11 +190,7 @@ python ".\Sketches pipeline\run_pipeline.py" --config ".\Sketches pipeline\confi
 - partial revealing/hiding of model support
 
 ### 3. Update-function properties
-- monotonicity/sign inference from source Boolean rules, encoded on AEON edges for revealed targets when the sign can be inferred
-- essentiality detection from source Boolean rules using the vendored `tools/boolnetanalyzer` helper module
-- essentiality can affect the sketch structurally by restricting symbolic non-exact rules to essential regulators only
-- canalization detection from source Boolean rules using the vendored `tools/boolnetanalyzer` helper module
-- canalization can affect the sketch structurally by rewriting symbolic rules into partial canalization templates when possible
+- monotonicity/sign inference for exactly revealed Boolean rules, encoded directly on AEON edges
 
 ### 4. Dynamic properties
 - trace-derived reachability properties
@@ -171,7 +224,7 @@ Controls which stage configs are used and which property families are included i
 | `include_trace_cycle_candidate_properties` | Include `trace_cycle_candidate_*` properties in the final sketch. |
 | `include_biolqm_fixed_point_properties` | Include `fixed_point_*` properties in the final sketch. |
 | `include_biolqm_trap_space_properties` | Include `trap_space_*` properties in the final sketch. |
-| `include_essentiality_structure_constraints` | Enable essentiality detection and essential-regulator-only symbolic supports during the structure step. |
+| `include_essentiality_structure_constraints` | Turn on essentiality detection and annotate/use essential regulators during the structure step. |
 | `include_canalization_structure_annotations` | Enable canalization detection/comments during the structure step for exact revealed rules. |
 
 Also supported by `run_pipeline.py`, but not used in the default sample:
@@ -277,16 +330,16 @@ Controls which parts of the generated BNet become visible in the sketch `## MODE
 | `seed` | Random seed for reveal choices. |
 | `edge_op` | Default AEON edge operator for unconstrained edges, usually `-??`. |
 | `hidden_policy` | How to represent functions with nothing revealed: `omit`, `question`, or `self`. |
-| `infer_monotonicity_for_exact` | If true, infer regulator signs from the source Boolean rules and write `->`, `-|`, or `-?` edges for revealed targets when possible. |
+| `infer_monotonicity_for_exact` | If true, infer regulator signs for exactly revealed rules and write `->`, `-|`, or `-?` edges. |
 | `positive_edge_op` | Edge operator used for inferred positive monotone regulation. |
 | `negative_edge_op` | Edge operator used for inferred negative monotone regulation. |
 | `ambiguous_edge_op` | Edge operator used for inferred essential but sign-ambiguous regulation. |
-| `infer_essentiality` | If true, detect essential and non-essential regulators from the Boolean rules. |
-| `apply_essentiality_to_symbolic_supports` | If true, symbolic non-exact rules reveal only essential regulators. |
-| `annotate_essentiality_comments` | If true, write essential/non-essential regulator comments in the `## MODEL` section. |
+| `infer_essentiality` | If true, detect essential and non-essential regulators from exact Boolean rules. |
+| `apply_essentiality_to_symbolic_supports` | If true, symbolic supports only reveal essential regulators when essentiality is enabled. |
+| `annotate_essentiality_comments` | If true, write essential/non-essential regulator summaries as comments in the `## MODEL` section. |
 | `essentiality_output` | Path for the essentiality report file. |
 | `infer_canalization_for_exact` | If true, detect canalizing variables for exactly revealed rules using BoolForge. |
-| `apply_canalization_templates` | If true, emit partial canalization templates for symbolic rules when a visible canalizing regulator is known. |
+| `apply_canalization_templates` | If true, use canalization-aware symbolic templates for non-exact targets when possible. |
 | `annotate_canalization_comments` | If true, write detected canalization as comments in the `## MODEL` section. |
 | `canalization_output` | Path for the canalization report file. |
 
@@ -347,7 +400,8 @@ It accepts either CLI flags or a key-value config with:
 
 ## Known External Assumptions
 
-- `bioLQM` must be installed or available under `tools/bioLQM/`
+- Java must be installed and available on `PATH`
+- the bundled `tools/bioLQM/` directory must remain present if you use the default config
 - R must have the `BoolNet` package installed
 - inference execution requires a local clone/build of the Boolean Network Sketches Rust repository
 
@@ -356,3 +410,4 @@ It accepts either CLI flags or a key-value config with:
 - `compress_stutter = true` is usually the right default for trace-derived properties.
 - Singleton traces are currently turned into trace-derived recurrence / attractor-candidate properties, not hard fixed-point claims.
 - If a generated BNet contains direct contradictions like `x_i = !x_i`, bioLQM may correctly report no fixed points.
+- `bnet_to_sketchStructure.py` may print `The module cana cannot be found...` on some environments through the BoolForge stack. The pipeline still works without `cana`; that warning only indicates optional functionality is unavailable.

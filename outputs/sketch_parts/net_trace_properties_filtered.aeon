@@ -1,0 +1,24 @@
+## PROPERTIES
+# Generated from traces in: C:\Users\35797\OneDrive\Desktop\THESIS\PIPELINE-REPO\outputs\traces
+# Genes file: C:\Users\35797\OneDrive\Desktop\THESIS\PIPELINE-REPO\outputs\traces\genes.txt
+# Trace files matched: 10 (experiment*_modeled.txt)
+# Pair mode: endpoints
+# compress_stutter: True
+# Raw transitions: 10
+# After dedup: 10
+# Raw singleton traces: 0
+# Singleton traces after dedup: 0
+# Raw cycle candidates: 0
+# Cycle candidates after dedup: 0
+# keep_percent: 50.0
+# Final properties written: 5
+# max_chain_states: 6
+# partial_state_size: 5
+# partial_state_mode: random_per_property
+# partial_state_genes: varies_per_property
+# seed: 42
+#! dynamic_property: reachability_1: #`3{x}: ( @{x}: ( (~x4 & ~x8 & x9 & ~x12 & ~x17) & EF((~x4 & ~x8 & ~x9 & ~x12 & ~x17)) ) )`#
+#! dynamic_property: reachability_2: #`3{x}: ( @{x}: ( (x9 & x10 & x12 & x13 & ~x25) & EF((x9 & x10 & x12 & ~x13 & ~x25)) ) )`#
+#! dynamic_property: reachability_3: #`3{x}: ( @{x}: ( (x5 & ~x8 & x10 & ~x11 & x13) & EF((x5 & ~x8 & x10 & ~x11 & ~x13)) ) )`#
+#! dynamic_property: reachability_4: #`3{x}: ( @{x}: ( (x15 & x17 & ~x22 & ~x23 & x25) & EF((x15 & ~x17 & x22 & ~x23 & ~x25)) ) )`#
+#! dynamic_property: reachability_5: #`3{x}: ( @{x}: ( (~x1 & ~x3 & ~x14 & ~x15 & ~x24) & EF((x1 & ~x3 & x14 & ~x15 & ~x24)) ) )`#

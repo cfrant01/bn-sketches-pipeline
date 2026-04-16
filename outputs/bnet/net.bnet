@@ -1,0 +1,29 @@
+# model in BoolNet format
+# the header targets, factors is mandatory to be importable in the R package BoolNet
+
+targets, factors
+x1 , (x17 & !x3) | (x3 & !x17) | (!x17 & !x19)
+x2 , x20 | (x3 & !x18)
+x3 , !x24 | (x13 & !x19)
+x4 , (x19 & !x13) | (!x13 & !x5)
+x5 , x10 | x13 | x6
+x6 , (x11 & x21) | (x16 & x21) | (!x11 & !x16 & !x21)
+x7 , x6 | (x11 & !x3)
+x8 , (x2 & x25) | (x25 & !x21) | (x21 & !x2 & !x25)
+x9 , (x19 & x4) | (x19 & !x18)
+x10, (x12 & !x25) | (x25 & !x12 & !x23)
+x11, (x9 & !x5) | (!x18 & !x9)
+x12, (x4 & !x14) | (x1 & x14 & !x4)
+x13, (x19 & !x22) | (x19 & !x9) | (!x22 & !x9) | (x22 & x9 & !x19)
+x14, (x8 & x9) | (x22 & !x9) | (!x8 & !x9)
+x15, (x12 & !x19) | (!x19 & !x5)
+x16, (x11 & !x8) | (x6 & !x11) | (x8 & !x11)
+x17, (x11 & x4) | (x22 & !x4)
+x18, (x3 & x8) | (x3 & !x16)
+x19, (x10 & x20 & x22) | (x20 & !x10 & !x22)
+x20, (x6 & !x7) | (!x17 & !x7) | (x17 & x7 & !x6)
+x21, (x20 & !x19) | (x20 & !x5) | (!x19 & !x5) | (x19 & x5 & !x20)
+x22, !x16 | !x18 | !x24
+x23, (x14 & x7) | (x14 & !x18) | (x18 & !x14 & !x7)
+x24, !x13 | (x4 & !x1)
+x25, (x10 & x16) | (x16 & !x24)

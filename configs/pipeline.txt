@@ -15,4 +15,5 @@ include_trace_attractor_candidate_properties = true
 include_trace_cycle_candidate_properties = true
 include_biolqm_fixed_point_properties = true
 include_biolqm_trap_space_properties = true
+include_essentiality_structure_constraints = false
 include_canalization_structure_annotations = false
