@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import boolforge as bf
+import inspect
 import yaml
 import sys
 from pathlib import Path
@@ -116,9 +117,31 @@ def make_acyclic_wiring_edge_by_edge(N, n, rng_seed=None):
     return I
 
 
+def filter_boolforge_kwargs(cfg):
+    """Keep only kwargs supported by the installed BoolForge version."""
+    supported = set(inspect.signature(bf.random_network).parameters)
+    filtered = {}
+    dropped = []
+
+    for key, value in cfg.items():
+        if key in supported:
+            filtered[key] = value
+        else:
+            dropped.append(key)
+
+    if dropped:
+        print(
+            "Ignoring unsupported BoolForge config keys for this installation: "
+            + ", ".join(sorted(dropped))
+        )
+
+    return filtered
+
+
 def main():
     script_dir = Path(__file__).resolve().parent
-    config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else script_dir / "configs" / "boolforge.yaml"
+    repo_root = script_dir.parent
+    config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else repo_root / "configs" / "boolforge.yaml"
 
     with config_path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -129,6 +152,7 @@ def main():
         output_path = (config_path.parent / output_path).resolve()
     acyclic = cfg.pop("acyclic", False)
     acyclic_method = cfg.pop("acyclic_method", "topological")
+    cfg = filter_boolforge_kwargs(cfg)
 
     # BoolForge currently crashes in the non-acyclic generator when
     # AT_LEAST_ONE_REGULATOR_PER_NODE=True, so force the safe setting.
