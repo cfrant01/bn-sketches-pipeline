@@ -5,12 +5,12 @@ indegree_distribution: constant
 NO_SELF_REGULATION: true
 STRONGLY_CONNECTED: false
 AT_LEAST_ONE_REGULATOR_PER_NODE: false
-bias: 0.0
+bias: 0.01
 depth: 0
 EXACT_DEPTH: false
 LINEAR: false
 ALLOW_DEGENERATE_FUNCTIONS: false
 rng: 42
 # --- Acyclic options ---
-acyclic: false
+acyclic: true
 acyclic_method: topological   # topological (fast) | edge_by_edge (more uniform)
