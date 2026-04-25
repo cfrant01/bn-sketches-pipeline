@@ -5,7 +5,7 @@ Pipeline for generating Boolean networks, traces, sketch parts, and a final AEON
 The current pipeline supports four sketch-information categories:
 - influence graph information
 - partially specified Boolean network structure
-- update-function properties (currently monotonicity/sign inference and optional canalization annotations for exact rules)
+- rule and structure annotations, including monotonicity/sign inference, essentiality-aware supports, essentiality comments, canalization comments, and canalization-aware symbolic templates
 - dynamic properties from traces and bioLQM
 
 The repository entry point for the full workflow is:
@@ -33,6 +33,11 @@ That final sketch is assembled from:
 - `outputs/sketch_parts/net_attractors_properties.aeon`
 - `outputs/sketch_parts/net_model_part.aeon`
 
+The `net_model_part.aeon` section can also contain structure-side annotations derived from exact Boolean rules, including:
+- essential vs non-essential regulator information
+- canalizing regulator comments
+- canalization-aware symbolic templates for partially revealed targets
+
 ## Pipeline Flow
 
 `run_pipeline.py` executes these stages:
@@ -44,7 +49,7 @@ That final sketch is assembled from:
 3. `traces_to_sketch_properties.py`
    Convert traces into dynamic sketch properties.
 4. `bnet_to_sketchStructure.py`
-   Convert the `.bnet` into the `## MODEL` section of the sketch.
+   Convert the `.bnet` into the `## MODEL` section of the sketch, with optional monotonicity, essentiality, and canalization annotations.
 5. `analyze_dynamics_biolqm.py`
    Compute raw fixed-point and trap-space outputs with bioLQM.
 6. `biolqm_to_sketch_properties.py`
@@ -150,11 +155,19 @@ java -version
 
 ## Quick Start
 
-Run the whole pipeline from the pipeline config:
+Run the whole pipeline with the default pipeline config (`configs\pipeline.txt`):
+
+```powershell
+python run_pipeline.py
+```
+
+Or pass the config path explicitly:
 
 ```powershell
 python run_pipeline.py --config configs\pipeline.txt
 ```
+
+Note: `--config` expects a real file path. `configs\pipeline` will fail because the shipped config file is [configs/pipeline.txt](c:\Users\35797\OneDrive\Desktop\THESIS\Sketches pipeline\sketches-pipeline-repo\configs\pipeline.txt).
 
 Dry run:
 
@@ -188,9 +201,13 @@ outputs/Final_Sketch/net_final_sketch.aeon
 - exact Boolean update rules for some targets
 - symbolic unknown rules for other revealed targets
 - partial revealing/hiding of model support
+- optional essentiality-aware symbolic supports that keep only essential regulators visible
+- optional canalization-aware symbolic templates when a visible regulator is detected as canalizing
 
 ### 3. Update-function properties
 - monotonicity/sign inference for exactly revealed Boolean rules, encoded directly on AEON edges
+- essentiality comments in the `## MODEL` section for exact revealed rules
+- canalization comments in the `## MODEL` section for exact revealed rules
 
 ### 4. Dynamic properties
 - trace-derived reachability properties
