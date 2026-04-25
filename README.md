@@ -5,7 +5,7 @@ Pipeline for generating Boolean networks, traces, sketch parts, and a final AEON
 The current pipeline supports four sketch-information categories:
 - influence graph information
 - partially specified Boolean network structure
-- rule and structure annotations, including monotonicity/sign inference, essentiality-aware supports, essentiality comments, canalization comments, and canalization-aware symbolic templates
+- function properties, where the sketch can enforce monotonicity, essentiality, and canalization constraints
 - dynamic properties from traces and bioLQM
 
 The repository entry point for the full workflow is:
