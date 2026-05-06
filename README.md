@@ -241,6 +241,7 @@ Controls which stage configs are used and which property families are included i
 | `include_trace_cycle_candidate_properties` | Include `trace_cycle_candidate_*` properties in the final sketch. |
 | `include_biolqm_fixed_point_properties` | Include `fixed_point_*` properties in the final sketch. |
 | `include_biolqm_trap_space_properties` | Include `trap_space_*` properties in the final sketch. |
+| `include_constant_depth_properties` | Include lifted `constant_*` properties from clamped subnetworks in the final sketch. |
 | `include_essentiality_structure_constraints` | Turn on essentiality detection and annotate/use essential regulators during the structure step. |
 | `include_canalization_structure_annotations` | Enable canalization detection/comments during the structure step for exact revealed rules. |
 
@@ -395,6 +396,45 @@ Controls conversion from raw bioLQM outputs into sketch properties.
 | `include_forbid_extra` | Emit additional forbid-extra constraints. Usually keep this `false` unless you know you want them. |
 | `no_dedup` | If true, keep duplicate properties. |
 | `no_properties_header` | If true, omit the `## PROPERTIES` header. |
+| `bnet` | Original `.bnet` file used for optional constant-depth subnetwork analysis. Required when `constant_depth > 1`. |
+| `constant_depth` | Depth of clamped-subnetwork properties. `1` means only the original network; `2` adds one-variable clamps; `3` adds one- and two-variable clamps. |
+| `constant_subnetwork_limit` | Maximum number of clamped subnetworks to analyze. `0` means no limit. |
+| `constant_property_prefix` | Prefix for lifted constant-depth property names. Default is `constant`. |
+| `biolqm_cmd` | bioLQM executable or wrapper used for constant-depth subnetwork analyses. |
+| `java_cmd` | Java executable used with `biolqm_jar`. |
+| `biolqm_jar` | Optional path to a bioLQM JAR. |
+
+#### Constant-depth properties
+
+When `constant_depth > 1`, `biolqm_to_sketch_properties.py` creates temporary clamped subnetworks from the original `.bnet`, runs bioLQM on each one, and lifts their fixed-point and trap-space results back into the full-network sketch as conditional HCTL constraints.
+
+For example, a one-variable clamp `x1 = 1` replaces the update rule of `x1` with `1` in a temporary `.bnet`. If that clamped network has a fixed point with pattern:
+
+```txt
+x1 & ~x2 & x3
+```
+
+the lifted property has this shape:
+
+```aeon
+#! dynamic_property: constant_x1_is_1_fixed_point_1: #`(3{c}: (@{c}: AG (x1))) => (3{x}: ( @{x}: ( (AG (x1)) & (x1 & ~x2 & x3) & (AX ((x1 & ~x2 & x3))) ) ))`#
+```
+
+The left side, `3{c}: (@{c}: AG (x1))`, says that the full network has some state from which `x1` remains true forever. The right side then requires the clamped fixed-point pattern to exist inside such an `x1`-stable region. Thus the property does not force `x1` to be globally true; it only applies if the full network can naturally enter a region where `x1` stays true.
+
+Trap-space results are lifted with the same guard, but use `AG EF <pattern>` instead of `AX <pattern>`:
+
+```aeon
+#! dynamic_property: constant_x1_is_1_trap_space_1: #`(3{c}: (@{c}: AG (x1))) => (3{x}: ( @{x}: ( (AG (x1)) & (x1 & ~x2 & x3) & (AG EF ((x1 & ~x2 & x3))) ) ))`#
+```
+
+For `constant_depth = 3`, the script also considers all two-variable clamps such as `x1 = 0, x2 = 1`, using a guard like:
+
+```hctl
+AG (~x1 & x2)
+```
+
+The number of subnetworks grows combinatorially, so use `constant_subnetwork_limit` when experimenting with larger networks.
 
 ## Inference Helper
 

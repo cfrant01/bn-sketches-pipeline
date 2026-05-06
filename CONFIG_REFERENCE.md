@@ -30,6 +30,7 @@ Keys:
 - `include_trace_cycle_candidate_properties`
 - `include_biolqm_fixed_point_properties`
 - `include_biolqm_trap_space_properties`
+- `include_constant_depth_properties`
 - `include_essentiality_structure_constraints`
 - `include_canalization_structure_annotations`
 
@@ -159,6 +160,26 @@ Keys:
 - `include_forbid_extra`
 - `no_dedup`
 - `no_properties_header`
+- `bnet`
+- `constant_depth`
+- `constant_subnetwork_limit`
+- `constant_property_prefix`
+- `biolqm_cmd`
+
+Also supported by the script:
+- `constantdepth` (alias for `constant_depth`)
+- `constant_limit` (alias for `constant_subnetwork_limit`)
+- `constantlimit` (alias for `constant_subnetwork_limit`)
+- `java_cmd`
+- `biolqm_jar`
+
+Notes:
+- `constant_depth = 1` keeps the original behavior: only fixed-point and trap-space properties from the full network are emitted.
+- `constant_depth = 2` also analyzes all one-variable clamped subnetworks, such as `x1=0`, `x1=1`, `x2=0`, and `x2=1`.
+- `constant_depth = 3` additionally analyzes all two-variable clamped subnetworks, and so on.
+- Constant-depth fixed points are lifted into conditional HCTL properties of the form `(3{c}: (@{c}: AG <clamp>)) => (3{x}: (@{x}: ((AG <clamp>) & <pattern> & AX <pattern>)))`.
+- Constant-depth trap spaces use the same guard, but replace `AX <pattern>` with `AG EF <pattern>`.
+- `constant_subnetwork_limit` can cap the number of clamped subnetworks analyzed; `0` means no limit.
 
 ## Notes
 
