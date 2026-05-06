@@ -227,6 +227,9 @@ def main() -> None:
     include_biolqm_trap_space_properties = cfg_get_bool(
         pipeline_cfg, "include_biolqm_trap_space_properties", True
     )
+    include_constant_depth_properties = cfg_get_bool(
+        pipeline_cfg, "include_constant_depth_properties", True
+    )
     include_essentiality_structure_constraints = cfg_get_bool(
         pipeline_cfg, "include_essentiality_structure_constraints", False
     )
@@ -374,6 +377,7 @@ def main() -> None:
                     if include_biolqm_trap_space_properties
                     else []
                 ),
+                *(["constant_"] if include_constant_depth_properties else []),
             ],
         )
         if attractor_kept:

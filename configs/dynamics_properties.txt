@@ -12,3 +12,15 @@ start_index = 1
 include_forbid_extra = false
 no_dedup = false
 no_properties_header = false
+
+# Optional constant-depth properties.
+# constant_depth = 1 keeps the current behavior: only properties from the original network.
+# constant_depth = 2 also analyzes all one-variable clamped subnetworks.
+# constant_depth = 3 also analyzes all two-variable clamped subnetworks, and so on.
+bnet = outputs/bnet/net.bnet
+constant_depth = 2
+constant_subnetwork_limit = 5
+constant_property_prefix = constant
+biolqm_cmd = tools/bioLQM/bioLQM.cmd
+# java_cmd = java
+# biolqm_jar = C:\path\to\bioLQM.jar
